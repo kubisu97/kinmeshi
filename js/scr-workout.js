@@ -589,12 +589,17 @@ function stopRestTimer() {
   restTimer.iv = null;
   const el = document.getElementById('rest-timer');
   if (el) el.style.display = 'none';
+  const big = document.getElementById('rt-big');
+  if (big) big.style.display = 'none';
 }
 function tickRestTimer() {
   const el = document.getElementById('rest-timer');
   if (!el) return;
   const remain = Math.max(0, Math.ceil((restTimer.end - Date.now()) / 1000));
-  el.querySelector('.rt-time').textContent = `${Math.floor(remain / 60)}:${String(remain % 60).padStart(2, '0')}`;
+  const txt = `${Math.floor(remain / 60)}:${String(remain % 60).padStart(2, '0')}`;
+  el.querySelector('.rt-time').textContent = txt;
+  const big = document.getElementById('rt-big');
+  if (big && big.style.display !== 'none') big.querySelector('.rtb-time').textContent = txt;
   if (remain <= 0) {
     stopRestTimer();
     restBeep();
@@ -610,7 +615,35 @@ function initRestTimer() {
     state.settings.restSec = num(e.target.value) || 90;
     saveState();
   });
+  // 数字タップでドデカ表示（ベンチに置いても見える）
+  const big = document.getElementById('rt-big');
+  el.querySelector('.rt-time').addEventListener('click', () => {
+    big.style.display = 'flex';
+    tickRestTimer();
+  });
+  big.addEventListener('click', (ev) => {
+    if (ev.target.closest('button')) return;
+    big.style.display = 'none';
+  });
+  big.querySelector('#rtb-plus').addEventListener('click', () => { restTimer.end += 30000; tickRestTimer(); });
+  big.querySelector('#rtb-skip').addEventListener('click', stopRestTimer);
 }
+
+/* 筋トレ中は画面をスリープさせない（Wake Lock） */
+let _wakeLock = null;
+async function updateWakeLock() {
+  try {
+    const want = App.tab === 'workout' && !document.hidden && 'wakeLock' in navigator;
+    if (want && !_wakeLock) {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+    } else if (!want && _wakeLock) {
+      const wl = _wakeLock; _wakeLock = null;
+      await wl.release();
+    }
+  } catch (e) { _wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => { updateWakeLock(); });
 
 /* ---------- マイルーチン ---------- */
 function saveRoutineFromToday(date) {

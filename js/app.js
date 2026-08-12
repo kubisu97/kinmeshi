@@ -17,6 +17,7 @@ function switchTab(tab) {
   });
   renderCurrent();
   window.scrollTo(0, 0);
+  if (typeof updateWakeLock === 'function') updateWakeLock();
 }
 
 function renderCurrent() {
