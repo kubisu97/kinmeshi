@@ -436,13 +436,21 @@ function parseInbodyCsv(text) {
   const findCol = (res) => head.findIndex(h => res.some(re => re.test(h)));
   const ci = {
     date: findCol([/測定日|日時|日付|date/i]),
-    weight: findCol([/体重|weight/i]),
-    bf: findCol([/体脂肪率|PBF|percent.*fat|body ?fat/i]),
-    muscle: findCol([/骨格筋|SMM|skeletal/i]),
+    weight: findCol([/^体重|weight/i]),
+    bf: findCol([/体脂肪率|PBF|percent ?body ?fat|body ?fat ?(%|percent)/i]),
+    muscle: findCol([/^骨格筋量|SMM|skeletal muscle mass/i]),
     bmr: findCol([/基礎代謝|BMR|basal/i]),
-    lbm: findCol([/除脂肪|LBM|lean/i]),
+    lbm: findCol([/除脂肪|LBM|lean body/i]),
   };
   if (ci.date < 0 || ci.weight < 0) return [];
+  const parseDate = (s) => {
+    s = String(s || '');
+    let m = s.match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    m = s.match(/^(\d{4})(\d{2})(\d{2})/); // InBody形式: 20260719163029
+    if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return `${m[1]}-${m[2]}-${m[3]}`;
+    return null;
+  };
   const out = [];
   for (let i = 1; i < lines.length; i++) {
     const c = split(lines[i]);
@@ -451,9 +459,8 @@ function parseInbodyCsv(text) {
       const n = Number(String(c[idx]).replace(/[^\d.]/g, ''));
       return isFinite(n) && n > 0 ? n : null;
     };
-    const dm = String(c[ci.date] || '').match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/);
-    if (!dm) continue;
-    const date = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
+    const date = parseDate(c[ci.date]);
+    if (!date) continue;
     const weight = numAt(ci.weight);
     if (!weight) continue;
     let bf = numAt(ci.bf);
