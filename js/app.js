@@ -5,6 +5,8 @@ const App = {
   tab: 'home',
   wDate: null,
   mDate: null,
+  calMonth: null,
+  calSel: null,
 };
 
 function switchTab(tab) {
@@ -21,6 +23,7 @@ function renderCurrent() {
   if (App.tab === 'home') renderHome(el);
   else if (App.tab === 'workout') renderWorkout(el);
   else if (App.tab === 'meals') renderMeals(el);
+  else if (App.tab === 'calendar') renderCalendar(el);
   else renderSettings(el);
 }
 
