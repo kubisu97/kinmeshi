@@ -94,6 +94,8 @@ body {
 .btn:disabled { opacity: .5; }
 .btn-row { display: flex; gap: 8px; margin-top: 10px; }
 .btn-row .btn { flex: 1; }
+.btn-row.wrap { flex-wrap: wrap; }
+.btn-row.wrap .btn { min-width: 72px; padding-left: 6px; padding-right: 6px; }
 .icon-btn {
   appearance: none; background: var(--surface-2); color: var(--ink2);
   border: 1px solid var(--border); border-radius: 10px;
