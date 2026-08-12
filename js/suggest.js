@@ -20,12 +20,40 @@ function nextTarget(exId, date) {
     const maxReps = last.sets.reduce((a, s) => Math.max(a, num(s.r)), 0);
     return { text: `${maxReps + 1}回に挑戦`, r: maxReps + 1 };
   }
+  // 有酸素: 距離を記録していれば距離+0.5km、なければ時間+5分
+  if (isCardioDistance(ex)) {
+    const maxKm = last.sets.reduce((a, s) => Math.max(a, num(s.w)), 0);
+    if (maxKm > 0) return { text: `${round1(maxKm + 0.5)}kmに挑戦`, w: round1(maxKm + 0.5) };
+  }
   const maxMin = last.sets.reduce((a, s) => Math.max(a, num(s.r)), 0);
   return { text: `${maxMin + 5}分に挑戦`, r: maxMin + 5 };
 }
 
-function fmtSets(sets, unit) {
-  return sets.map(s => unit === 'kg' ? `${num(s.w)}kg×${num(s.r)}` : (unit === 'min' ? `${num(s.r)}分` : `${num(s.r)}回`)).join(', ');
+/* 有酸素のペース表示（種目に応じて単位を変える） */
+function cardioPaceText(ex, min, km) {
+  min = num(min); km = num(km);
+  if (!min || !km) return '';
+  if (ex.id === 'px62') return (km / (min / 60)).toFixed(1) + 'km/h';          // バイク=速度
+  if (ex.id === 'px63') {                                                       // 水泳=/100m
+    const sec100 = (min * 60) / (km * 10);
+    return `${Math.floor(sec100 / 60)}'${String(Math.round(sec100 % 60)).padStart(2, '0')}"/100m`;
+  }
+  let sec = (min * 60) / km;                                                     // ラン等=/km
+  let m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  if (s === 60) { m += 1; s = 0; }
+  return `${m}'${String(s).padStart(2, '0')}"/km`;
+}
+function isCardioDistance(ex) { return ex.muscle === 'cardio' && ex.id !== 'px64'; } // 縄跳びは時間のみ
+
+function fmtSets(sets, unit, ex) {
+  return sets.map(s => {
+    if (unit === 'kg') return `${num(s.w)}kg×${num(s.r)}`;
+    if (ex && isCardioDistance(ex) && num(s.w) > 0) {
+      const pace = cardioPaceText(ex, s.r, s.w);
+      return `${num(s.w)}km/${num(s.r)}分${pace ? `(${pace})` : ''}`;
+    }
+    return unit === 'min' ? `${num(s.r)}分` : `${num(s.r)}回`;
+  }).join(', ');
 }
 
 /* 筋トレの提案カード */
@@ -82,7 +110,7 @@ function workoutSuggestions(date) {
     if (t && lastS) {
       out.push({
         icon: '📈', title: `${ex.name}は${t.text}`,
-        body: `前回(${fmtDateJa(lastS.date)})は ${fmtSets(lastS.sets, ex.unit)}。少しずつ負荷を上げるのが成長の近道です。`,
+        body: `前回(${fmtDateJa(lastS.date)})は ${fmtSets(lastS.sets, ex.unit, ex)}。少しずつ負荷を上げるのが成長の近道です。`,
         action: { type: 'goWorkout' },
       });
       break; // 1件だけ
@@ -173,7 +201,7 @@ function buildCoachSummary() {
       const ex = exById(e.exId);
       const done = e.sets.filter(s => s.done);
       if (!ex || done.length === 0) return null;
-      return `${ex.name} ${fmtSets(done, ex.unit)}`;
+      return `${ex.name} ${fmtSets(done, ex.unit, ex)}`;
     }).filter(Boolean);
     if (parts.length) lines.push(`${fmtDateJa(d)}: ${parts.join(' / ')}`);
   }

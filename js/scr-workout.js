@@ -14,6 +14,15 @@ function unitInputsHtml(ex, s, ei, si) {
       <input type="number" inputmode="numeric" step="1" min="0" class="set-in r-in" value="${s.r ?? ''}" placeholder="0" data-ei="${ei}" data-si="${si}" data-k="r" aria-label="回数">
       <span class="set-x">回</span>`;
   }
+  if (isCardioDistance(ex)) {
+    const pace = cardioPaceText(ex, s.r, s.w);
+    return `
+      <input type="number" inputmode="numeric" step="1" min="0" class="set-in r-in" value="${s.r ?? ''}" placeholder="0" data-ei="${ei}" data-si="${si}" data-k="r" aria-label="時間（分）">
+      <span class="set-x">分</span>
+      <input type="number" inputmode="decimal" step="0.1" min="0" class="set-in km-in" value="${s.w ?? ''}" placeholder="－" data-ei="${ei}" data-si="${si}" data-k="w" aria-label="距離（km）">
+      <span class="set-x">km</span>
+      <span class="set-pace">${pace}</span>`;
+  }
   const u = ex.unit === 'min' ? '分' : '回';
   return `
       <input type="number" inputmode="numeric" step="1" min="0" class="set-in r-in wide" value="${s.r ?? ''}" placeholder="0" data-ei="${ei}" data-si="${si}" data-k="r" aria-label="${u}数">
@@ -32,7 +41,7 @@ function renderWorkout(el) {
     const last = lastSessionOf(entry.exId, date);
     const target = nextTarget(entry.exId, date);
     const setsHtml = entry.sets.map((s, si) => `
-      <div class="set-row ${s.done ? 'done' : ''}">
+      <div class="set-row ${s.done ? 'done' : ''} ${isCardioDistance(ex) ? 'cardio' : ''}">
         <span class="set-no">${si + 1}</span>
         ${unitInputsHtml(ex, s, ei, si)}
         <button class="set-check" data-ei="${ei}" data-si="${si}" aria-label="完了">${s.done ? '✓' : ''}</button>
@@ -47,7 +56,7 @@ function renderWorkout(el) {
             <div class="ex-name">${esc(ex.name)}</div>
             <div class="ex-meta">
               <span class="chip">${MUSCLES[ex.muscle].label}</span>
-              ${last ? `<span class="ex-last">前回 ${fmtDateJa(last.date)}: ${esc(fmtSets(last.sets, ex.unit))}</span>` : '<span class="ex-last">はじめての種目</span>'}
+              ${last ? `<span class="ex-last">前回 ${fmtDateJa(last.date)}: ${esc(fmtSets(last.sets, ex.unit, ex))}</span>` : '<span class="ex-last">はじめての種目</span>'}
             </div>
           </div>
         </div>
@@ -83,10 +92,11 @@ function renderWorkout(el) {
     }
   }
 
+  const cMin = cardioMinutes(date);
   el.innerHTML = `
     <header class="screen-head"><h1 class="screen-title">筋トレ</h1></header>
     ${dateNavHtml(date, 'wd')}
-    ${doneSets > 0 ? `<div class="day-summary">${doneSets}セット完了${vol > 0 ? ` ・ 総ボリューム <b>${Math.round(vol).toLocaleString()}</b> kg` : ''}</div>` : ''}
+    ${doneSets > 0 ? `<div class="day-summary">${doneSets}セット完了${vol > 0 ? ` ・ 総ボリューム <b>${Math.round(vol).toLocaleString()}</b> kg` : ''}${cMin > 0 ? ` ・ 有酸素 <b>${cMin}</b>分` : ''}</div>` : ''}
     ${entriesHtml || `<div class="empty-note">「＋ 種目を追加」からトレーニングを記録しましょう</div>`}
     <button class="btn primary big" id="add-ex">＋ 種目を追加</button>
 
@@ -117,6 +127,12 @@ function renderWorkout(el) {
       if (!entry) return;
       entry.sets[+si][k] = inp.value === '' ? null : Number(inp.value);
       saveState();
+      // 有酸素はペース表示をその場で更新
+      const ex = exById(entry.exId);
+      if (ex && isCardioDistance(ex)) {
+        const paceEl = inp.closest('.set-row')?.querySelector('.set-pace');
+        if (paceEl) paceEl.textContent = cardioPaceText(ex, entry.sets[+si].r, entry.sets[+si].w);
+      }
     });
   });
   // 完了チェック
@@ -125,11 +141,10 @@ function renderWorkout(el) {
       const { ei, si } = btn.dataset;
       const entry = ensureWorkout(date).entries[+ei];
       const s = entry.sets[+si];
-      // 値が空なら前のセットや前回から推測して埋める
-      const ex = exById(entry.exId);
-      if (!s.done && ex.unit === 'kg' && (s.w == null || s.r == null)) {
+      // 値が空なら前のセットから推測して埋める
+      if (!s.done && (s.w == null || s.r == null)) {
         const prev = entry.sets[+si - 1];
-        if (prev && prev.w != null) { s.w = s.w ?? prev.w; s.r = s.r ?? prev.r; }
+        if (prev) { s.w = s.w ?? prev.w; s.r = s.r ?? prev.r; }
       }
       s.done = !s.done;
       saveState();
@@ -243,7 +258,7 @@ function openAddExercise(date, screenEl) {
       <button class="ex-item ${inToday.has(e.id) ? 'added' : ''}" data-id="${e.id}">
         <span class="ex-item-art">${exArt(e.id)}</span>
         <span class="ex-item-name">${esc(e.name)}</span>
-        <span class="ex-item-meta">${MUSCLES[e.muscle].label}${last ? ` ・ 前回 ${esc(fmtSets(last.sets, e.unit))}` : ''}</span>
+        <span class="ex-item-meta">${MUSCLES[e.muscle].label}${last ? ` ・ 前回 ${esc(fmtSets(last.sets, e.unit, e))}` : ''}</span>
         <span class="ex-item-add">${inToday.has(e.id) ? '追加済' : '＋'}</span>
       </button>`;
     }).join('') || '<div class="empty-note small">見つかりません。下からカスタム種目を作れます。</div>';

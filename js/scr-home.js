@@ -58,7 +58,7 @@ function renderHome(el) {
       ${doneSets > 0 ? `
         <div class="today-workout">
           <div class="tw-main">${muscles.map(m => `<span class="chip">${MUSCLES[m].label}</span>`).join('')}</div>
-          <div class="tw-stats">${doneSets}セット${vol > 0 ? ` ・ 総ボリューム <b>${Math.round(vol).toLocaleString()}</b>kg` : ''}</div>
+          <div class="tw-stats">${doneSets}セット${vol > 0 ? ` ・ 総ボリューム <b>${Math.round(vol).toLocaleString()}</b>kg` : ''}${cardioMinutes(d) > 0 ? ` ・ 有酸素 <b>${cardioMinutes(d)}</b>分` : ''}</div>
           <button class="btn ghost small" id="tw-open">記録を見る</button>
         </div>` : `
         <div class="today-workout empty">

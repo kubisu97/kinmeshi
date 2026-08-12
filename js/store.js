@@ -110,6 +110,17 @@ function workoutMuscles(date) {
   }
   return [...set];
 }
+function cardioMinutes(date) {
+  const w = workoutOf(date);
+  if (!w) return 0;
+  let min = 0;
+  for (const e of w.entries) {
+    const ex = exById(e.exId);
+    if (!ex || ex.muscle !== 'cardio') continue;
+    for (const s of e.sets) { if (s.done) min += num(s.r); }
+  }
+  return min;
+}
 function workoutDoneSets(date) {
   const w = workoutOf(date);
   if (!w) return 0;
@@ -203,7 +214,10 @@ async function photoAll() {
 /* ---------- バックアップ ---------- */
 async function exportData() {
   const photos = await photoAll();
-  const blob = new Blob([JSON.stringify({ app: 'kinmeshi', ver: 1, state, photos })], { type: 'application/json' });
+  // セキュリティ: APIキーはバックアップに含めない（端末の外に出さない）
+  const safeState = JSON.parse(JSON.stringify(state));
+  if (safeState.settings) safeState.settings.apiKey = '';
+  const blob = new Blob([JSON.stringify({ app: 'kinmeshi', ver: 1, state: safeState, photos })], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `kinmeshi_backup_${todayStr().replace(/-/g, '')}.json`;
@@ -214,7 +228,10 @@ async function importData(file) {
   const text = await file.text();
   const obj = JSON.parse(text);
   if (!obj || obj.app !== 'kinmeshi' || !obj.state) throw new Error('筋メシのバックアップファイルではありません');
+  // 端末に設定済みのAPIキーは引き継ぐ（バックアップには含まれないため）
+  const currentKey = state && state.settings ? state.settings.apiKey : '';
   state = obj.state;
+  if (state.settings && !state.settings.apiKey) state.settings.apiKey = currentKey || '';
   saveState();
   if (Array.isArray(obj.photos)) {
     for (const ph of obj.photos) { if (ph && ph.id) await photoPut(ph.id, ph.data); }
