@@ -115,6 +115,43 @@ async function analyzeMealPhoto(dataUrl) {
   };
 }
 
+/* ---------- 食事テキストの解析（手動入力のAIアシスト） ---------- */
+async function analyzeMealText(desc) {
+  const prompt = `あなたは経験豊富な管理栄養士です。私が食べた食事は次の通りです:
+「${desc}」
+
+それぞれの栄養価を推定してください。量の記載がないものは日本の一般的な1人前で計算してください。
+コンビニやチェーン店の商品名が書かれていれば、その商品の一般的な栄養成分で計算してください。
+
+必ず次のJSON形式だけで回答してください（説明文は不要）:
+{
+  "dish": "食事全体の短い名前",
+  "items": [
+    {"name": "品名", "amount": "量のめやす", "kcal": 数値, "p": タンパク質g, "f": 脂質g, "c": 炭水化物g}
+  ],
+  "total": {"kcal": 数値, "p": 数値, "f": 数値, "c": 数値},
+  "confidence": 0から1の数値,
+  "note": "推定の注意点があれば短く"
+}
+食べ物が含まれない場合は {"dish": null} とだけ回答してください。`;
+  const text = await geminiGenerate([{ text: prompt }], true);
+  const obj = parseJsonLoose(text);
+  if (!obj || !obj.dish) throw new Error('食べ物として認識できませんでした。「カツ丼と味噌汁」のように書いてみてください。');
+  const total = obj.total || {};
+  const items = Array.isArray(obj.items) ? obj.items : [];
+  const sum = (k) => items.reduce((a, i) => a + num(i[k]), 0);
+  return {
+    name: String(obj.dish),
+    items,
+    kcal: Math.round(num(total.kcal) || sum('kcal')),
+    p: round1(num(total.p) || sum('p')),
+    f: round1(num(total.f) || sum('f')),
+    c: round1(num(total.c) || sum('c')),
+    confidence: num(obj.confidence),
+    note: obj.note || '',
+  };
+}
+
 /* ---------- InBody結果用紙の読み取り ---------- */
 const INBODY_PROMPT = `この画像は体成分分析（InBodyなど）の結果用紙、またはInBodyアプリの画面スクリーンショットです。次の項目を読み取ってください。
 必ず次のJSON形式だけで回答してください（説明文は不要）:

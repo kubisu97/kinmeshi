@@ -166,7 +166,16 @@ function downscale(file, maxSize, quality) {
 
 /* ---------- 手動記録 ---------- */
 function openManualMeal() {
+  const hasKey = !!state.settings.apiKey;
   const body = sheet('食事を記録', `
+    ${hasKey ? `
+    <div class="ai-text-box">
+      <div class="qf-label">🤖 食べたものを書くだけでAIが計算</div>
+      <textarea class="input" id="mm-ai-text" rows="2" placeholder="例: カツ丼と味噌汁とサラダ。あとビール500ml"></textarea>
+      <button class="btn primary small" id="mm-ai-btn" style="margin-top:8px">AIにカロリーを計算してもらう</button>
+      <div id="mm-ai-out"></div>
+    </div>` : `
+    <div class="an-note">🤖 APIキーを設定すると「食べたものを書くだけでAIがカロリー計算」が使えます（設定タブから）</div>`}
     <div class="qf-label">よく食べるものからタップで追加</div>
     <div class="qf-grid">
       ${QUICK_FOODS.map((f, i) => `<button class="qf-chip" data-qf="${i}">${esc(f.name)}<small>${f.kcal}kcal</small></button>`).join('')}
@@ -187,6 +196,33 @@ function openManualMeal() {
     </div>
   `);
   const get = id => body.querySelector(id);
+
+  // AIテキスト解析
+  const aiBtn = get('#mm-ai-btn');
+  if (aiBtn) aiBtn.addEventListener('click', async () => {
+    const desc = get('#mm-ai-text').value.trim();
+    if (!desc) { toast('食べたものを入力してください'); return; }
+    aiBtn.disabled = true; aiBtn.textContent = 'AIが計算中…';
+    const out = get('#mm-ai-out');
+    out.innerHTML = '';
+    try {
+      const r = await analyzeMealText(desc);
+      get('#mm-name').value = r.name;
+      get('#mm-kcal').value = r.kcal;
+      get('#mm-p').value = r.p;
+      get('#mm-f').value = r.f;
+      get('#mm-c').value = r.c;
+      body._aiItems = r.items || [];
+      const itemsHtml = r.items && r.items.length ? `
+        <div class="an-items">${r.items.map(i => `<div class="an-item"><span>${esc(i.name)}<small> ${esc(i.amount || '')}</small></span><span>${Math.round(num(i.kcal))}kcal</span></div>`).join('')}</div>` : '';
+      out.innerHTML = `${r.note ? `<div class="an-note">${esc(r.note)}</div>` : ''}${itemsHtml}
+        <div class="hint">下の欄に反映しました。数値は直せます。そのまま保存でOK</div>`;
+    } catch (e) {
+      out.innerHTML = `<div class="an-note err">${esc(e.message === 'NO_KEY' ? '設定タブでAPIキーを設定してください' : e.message)}</div>`;
+    }
+    aiBtn.disabled = false; aiBtn.textContent = 'AIにカロリーを計算してもらう';
+  });
+
   body.querySelectorAll('.qf-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       const f = QUICK_FOODS[+chip.dataset.qf];
@@ -209,7 +245,8 @@ function openManualMeal() {
       id: uid(), time: get('#mm-time').value || nowTimeStr(), name,
       kcal: num(get('#mm-kcal').value), p: num(get('#mm-p').value),
       f: num(get('#mm-f').value), c: num(get('#mm-c').value),
-      photo: null, src: 'manual', items: [],
+      photo: null, src: body._aiItems && body._aiItems.length ? 'ai' : 'manual',
+      items: body._aiItems || [],
     });
     saveState();
     closeSheet();

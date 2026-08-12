@@ -139,7 +139,7 @@ function renderSettings(el) {
       </div>
     </section>
 
-    <div class="about">筋メシ v1.4 ・ あなた専用の筋トレ＆食事管理</div>
+    <div class="about">筋メシ v1.5 ・ あなた専用の筋トレ＆食事管理</div>
   `;
 
   const $ = id => el.querySelector(id);
