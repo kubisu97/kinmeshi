@@ -179,18 +179,22 @@ body {
 .chip.sel { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ex-list { display: flex; flex-direction: column; gap: 6px; max-height: 44vh; overflow-y: auto; }
 .ex-item {
-  display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "art name add" "art meta add";
+  display: grid; grid-template-columns: auto 1fr auto;
+  grid-template-areas: "art name add" "art desc add" "art last add";
   column-gap: 10px; align-items: center;
   text-align: left; background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 12px; padding: 8px 12px 8px 8px; cursor: pointer; color: var(--ink); font-family: inherit; font-size: 14px;
 }
 .ex-item-art { grid-area: art; }
 .ex-art { display: block; background: var(--bg); border-radius: 10px; }
-.ex-item-art .ex-art { width: 46px; height: 46px; }
+.ex-item-art .ex-art { width: 58px; height: 58px; }
+.ex-item-desc { grid-area: desc; font-size: 11px; color: var(--muted); line-height: 1.45; }
+.ex-item-last { grid-area: last; font-size: 11px; color: var(--c-p); font-weight: 600; }
+.ex-group { font-size: 12px; font-weight: 800; color: var(--muted); margin: 12px 2px 2px; }
+.ex-group:first-child { margin-top: 2px; }
 .ex-card-art .ex-art { width: 44px; height: 44px; }
 .ex-head-l { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
 .ex-item-name { grid-area: name; font-weight: 700; }
-.ex-item-meta { grid-area: meta; font-size: 12px; color: var(--muted); }
 .ex-item-add { grid-area: add; align-self: center; font-size: 18px; color: var(--accent); font-weight: 800; }
 .ex-item.added { opacity: .55; }
 .ex-item.added .ex-item-add { font-size: 12px; color: var(--muted); }
@@ -365,3 +369,14 @@ select.input { appearance: none; }
 
 /* タブ5つ用に少し詰める */
 .tabbar button { padding: 4px 8px; }
+
+/* ---------- InBody ---------- */
+.ib-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ib-cell { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 2px; text-align: center; }
+.ib-cell b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+.ib-cell span { font-size: 10px; color: var(--muted); }
+.ib-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.ib-row:last-child { border-bottom: none; }
+.ib-row-v { flex: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip.gym { border-style: dashed; }
+.chip.gym.sel { border-style: solid; }
