@@ -448,3 +448,34 @@ select.input { appearance: none; }
   align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
 }
 .fav-edit-toggle { appearance: none; background: none; border: none; color: var(--c-p); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+
+/* ---------- レストタイマー ドデカ表示 ---------- */
+#rest-timer .rt-time { cursor: pointer; }
+#rt-big {
+  position: fixed; inset: 0; z-index: 97;
+  background: rgba(10, 10, 10, .97);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+}
+#rt-big .rtb-label { font-size: 22px; font-weight: 800; color: var(--ink2); }
+#rt-big .rtb-time {
+  font-size: 120px; font-weight: 800; color: var(--c-p);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+#rt-big .rtb-btns { display: flex; gap: 14px; margin-top: 10px; }
+#rt-big .rtb-btns button {
+  appearance: none; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--ink);
+  font-family: inherit; font-size: 17px; font-weight: 700; padding: 14px 26px; cursor: pointer;
+}
+#rt-big .rtb-hint { font-size: 12px; color: var(--muted); margin-top: 14px; }
+
+/* ---------- 更新バナー ---------- */
+#update-bar {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%);
+  z-index: 96; appearance: none; border: none; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink);
+  font-family: inherit; font-size: 13px; font-weight: 800;
+  padding: 10px 18px; border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.55);
+  max-width: 92vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
