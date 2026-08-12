@@ -60,7 +60,10 @@ function renderWorkout(el) {
             </div>
           </div>
         </div>
-        <button class="icon-btn" data-del-entry="${ei}" aria-label="種目を削除">✕</button>
+        <div class="ex-head-btns">
+          <button class="icon-btn" data-trend="${ex.id}" aria-label="成長グラフ">📈</button>
+          <button class="icon-btn" data-del-entry="${ei}" aria-label="種目を削除">✕</button>
+        </div>
       </div>
       ${target ? `<div class="ex-target">📈 次の目標: ${esc(target.text)}</div>` : ''}
       <div class="sets">${setsHtml}</div>
@@ -100,6 +103,10 @@ function renderWorkout(el) {
     ${entriesHtml || `<div class="empty-note">「＋ 種目を追加」からトレーニングを記録しましょう</div>`}
     <button class="btn primary big" id="add-ex">＋ 種目を追加</button>
     <button class="btn ghost big" id="ai-menu" style="margin-top:8px">🤖 AIとメニューを作る</button>
+    ${state.routines.length ? `
+    <h2 class="section-title">マイルーチン</h2>
+    <div class="chip-row">${state.routines.map(r => `<button class="chip" data-rt="${r.id}">⭐ ${esc(r.name)}</button>`).join('')}</div>` : ''}
+    ${w.entries.length ? `<button class="btn ghost small" id="save-routine" style="margin-top:10px">⭐ 今日の内容をルーチンに保存</button>` : ''}
 
     <h2 class="section-title">直近7日のボリューム</h2>
     <section class="card">
@@ -120,6 +127,10 @@ function renderWorkout(el) {
 
   el.querySelector('#add-ex').addEventListener('click', () => openAddExercise(date, el));
   el.querySelector('#ai-menu').addEventListener('click', () => openAiMenu(date, el));
+  el.querySelectorAll('[data-rt]').forEach(c => c.addEventListener('click', () => openRoutine(c.dataset.rt, date, el)));
+  const sr = el.querySelector('#save-routine');
+  if (sr) sr.addEventListener('click', () => saveRoutineFromToday(date));
+  el.querySelectorAll('[data-trend]').forEach(b => b.addEventListener('click', () => openExerciseTrend(b.dataset.trend)));
 
   // セット入力
   el.querySelectorAll('.set-in').forEach(inp => {
@@ -150,6 +161,7 @@ function renderWorkout(el) {
       }
       s.done = !s.done;
       saveState();
+      if (s.done) startRestTimer(); // ✓でレストタイマー開始
       renderWorkout(el);
     });
   });
@@ -539,4 +551,159 @@ function openAiMenu(date, screenEl) {
   };
 
   body.querySelector('#menu-gen').addEventListener('click', () => generate(null));
+}
+
+/* ---------- レストタイマー ---------- */
+const restTimer = { end: 0, iv: null };
+let _audioCtx = null;
+function restBeep() {
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const t0 = _audioCtx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const o = _audioCtx.createOscillator();
+      const g = _audioCtx.createGain();
+      o.connect(g); g.connect(_audioCtx.destination);
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.001, t0 + i * 0.25);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.25 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + i * 0.25 + 0.2);
+      o.start(t0 + i * 0.25); o.stop(t0 + i * 0.25 + 0.22);
+    }
+  } catch (e) { /* noop */ }
+}
+function startRestTimer() {
+  try { _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (_audioCtx.state === 'suspended') _audioCtx.resume(); } catch (e) { /* noop */ }
+  const el = document.getElementById('rest-timer');
+  if (!el) return;
+  const sec = Math.max(15, num(state.settings.restSec) || 90);
+  restTimer.end = Date.now() + sec * 1000;
+  el.style.display = 'flex';
+  el.querySelector('#rt-sec').value = String(sec);
+  clearInterval(restTimer.iv);
+  restTimer.iv = setInterval(tickRestTimer, 250);
+  tickRestTimer();
+}
+function stopRestTimer() {
+  clearInterval(restTimer.iv);
+  restTimer.iv = null;
+  const el = document.getElementById('rest-timer');
+  if (el) el.style.display = 'none';
+}
+function tickRestTimer() {
+  const el = document.getElementById('rest-timer');
+  if (!el) return;
+  const remain = Math.max(0, Math.ceil((restTimer.end - Date.now()) / 1000));
+  el.querySelector('.rt-time').textContent = `${Math.floor(remain / 60)}:${String(remain % 60).padStart(2, '0')}`;
+  if (remain <= 0) {
+    stopRestTimer();
+    restBeep();
+    toast('☕ 休憩おわり！次のセット🔥');
+  }
+}
+function initRestTimer() {
+  const el = document.getElementById('rest-timer');
+  if (!el) return;
+  el.querySelector('#rt-plus').addEventListener('click', () => { restTimer.end += 30000; tickRestTimer(); });
+  el.querySelector('#rt-skip').addEventListener('click', stopRestTimer);
+  el.querySelector('#rt-sec').addEventListener('change', e => {
+    state.settings.restSec = num(e.target.value) || 90;
+    saveState();
+  });
+}
+
+/* ---------- マイルーチン ---------- */
+function saveRoutineFromToday(date) {
+  const w = workoutOf(date);
+  if (!w || !w.entries.length) { toast('保存する種目がありません'); return; }
+  const body = sheet('ルーチンとして保存', `
+    <label class="f-label">ルーチン名
+      <input type="text" class="input" id="rt-name" placeholder="例: 胸の日A / ホリデイ60分">
+    </label>
+    <div class="an-note">今日の${w.entries.length}種目（セット・重量ごと）をテンプレとして保存します。</div>
+    <div class="btn-row">
+      <button class="btn ghost" id="rt-cancel">キャンセル</button>
+      <button class="btn primary" id="rt-save">保存する</button>
+    </div>`);
+  body.querySelector('#rt-cancel').addEventListener('click', closeSheet);
+  body.querySelector('#rt-save').addEventListener('click', () => {
+    const name = body.querySelector('#rt-name').value.trim();
+    if (!name) { toast('名前を入力してください'); return; }
+    state.routines.push({
+      id: uid(), name,
+      items: w.entries.map(e => ({ exId: e.exId, sets: e.sets.map(s => ({ w: s.w ?? null, r: s.r ?? null })) })),
+    });
+    saveState();
+    closeSheet();
+    renderCurrent();
+    toast(`「${name}」を保存しました ⭐`);
+  });
+}
+
+function openRoutine(rid, date, screenEl) {
+  const rt = state.routines.find(r => r.id === rid);
+  if (!rt) return;
+  const menu = { items: rt.items };
+  const body = sheet(`⭐ ${rt.name}`, `
+    <div class="menu-list">${menuItemsHtml(menu)}</div>
+    <div class="btn-row">
+      <button class="btn danger ghost" id="rt-del">削除</button>
+      <button class="btn primary" id="rt-apply">今日にセット</button>
+    </div>`);
+  body.querySelector('#rt-apply').addEventListener('click', () => {
+    const w = ensureWorkout(date);
+    const already = new Set(w.entries.map(e => e.exId));
+    let added = 0;
+    for (const it of rt.items) {
+      if (already.has(it.exId) || !exById(it.exId)) continue;
+      w.entries.push({ id: uid(), exId: it.exId, sets: it.sets.map(s => ({ w: s.w ?? null, r: s.r ?? null, done: false })) });
+      added++;
+    }
+    saveState();
+    closeSheet();
+    renderWorkout(screenEl);
+    toast(added ? `「${rt.name}」をセットしました（${added}種目）` : 'すべて追加済みでした');
+  });
+  body.querySelector('#rt-del').addEventListener('click', async () => {
+    if (await confirmDlg(`ルーチン「${rt.name}」を削除しますか？`)) {
+      state.routines = state.routines.filter(r => r.id !== rid);
+      saveState();
+      renderCurrent();
+    }
+  });
+}
+
+/* ---------- 種目の成長グラフ（推定1RM） ---------- */
+function epley1rm(w, r) { return r > 1 ? w * (1 + r / 30) : w; }
+
+function openExerciseTrend(exId) {
+  const ex = exById(exId);
+  if (!ex) return;
+  const sessions = [];
+  for (const d of Object.keys(state.workouts).sort()) {
+    const entry = (state.workouts[d].entries || []).find(e => e.exId === exId && e.sets.some(s => s.done));
+    if (!entry) continue;
+    const done = entry.sets.filter(s => s.done);
+    if (ex.unit === 'kg') {
+      const best = Math.max(...done.map(s => epley1rm(num(s.w), num(s.r))));
+      const topW = Math.max(...done.map(s => num(s.w)));
+      sessions.push({ d, v: round1(best), sub: fmtSets(done, ex.unit, ex), topW });
+    } else {
+      const best = Math.max(...done.map(s => num(s.r)));
+      sessions.push({ d, v: best, sub: fmtSets(done, ex.unit, ex) });
+    }
+  }
+  const isKg = ex.unit === 'kg';
+  const unitLabel = isKg ? 'kg' : (ex.unit === 'min' ? '分' : '回');
+  const best = sessions.length ? Math.max(...sessions.map(s => s.v)) : 0;
+  const body = sheet(`📈 ${ex.name}の成長`, `
+    ${sessions.length ? `
+      <div class="trend-best">これまでのベスト${isKg ? '（推定MAX）' : ''}: <b>${best}${unitLabel}</b></div>
+      ${lineChart({ points: sessions.slice(-15).map(s => ({ v: s.v, label: fmtDateJa(s.d) })), unit: unitLabel })}
+      <div class="hint" style="margin-top:6px">${isKg ? '推定MAX＝その日のベストセットから計算（Epley式）。' : ''}</div>
+      <div class="an-items" style="margin-top:8px">
+        ${sessions.slice(-6).reverse().map(s => `<div class="an-item"><span>${fmtDateJa(s.d)}</span><span>${esc(s.sub)}</span></div>`).join('')}
+      </div>` : '<div class="empty-note">この種目の記録がまだありません</div>'}
+  `);
+  initChartTips(body);
 }

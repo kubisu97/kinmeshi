@@ -85,6 +85,40 @@ function muscleBalanceBars(counts) {
   return `<div class="hbars">${rows}</div>`;
 }
 
+/* 折れ線チャート（1系列・単色。体組成・1RM推移用） */
+function lineChart({ points, unit, fmt }) {
+  if (!points || points.length < 2) return '<div class="empty-note small">2回以上のデータがたまるとグラフになります</div>';
+  const W = 320, H = 110, padX = 10, padT = 16, padB = 18;
+  const f = fmt || (v => String(Math.round(v * 10) / 10));
+  const vals = points.map(p => p.v);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (max === min) { max += 1; min -= 1; }
+  const range = max - min;
+  min -= range * 0.15; max += range * 0.15;
+  const X = i => padX + (W - padX * 2) * (i / (points.length - 1));
+  const Y = v => padT + (H - padT - padB) * (1 - (v - min) / (max - min));
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' ');
+  const maxIdx = vals.indexOf(Math.max(...vals));
+  const lastIdx = points.length - 1;
+  let dots = '', labels = '';
+  points.forEach((p, i) => {
+    dots += `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="${points.length > 15 ? 2 : 3}" fill="var(--c-p)"/>`;
+    // 直接ラベルは最初・最後・最大のみ（選択的ラベル）
+    if (i === 0 || i === lastIdx || i === maxIdx) {
+      labels += `<text x="${X(i).toFixed(1)}" y="${(Y(p.v) - 7).toFixed(1)}" text-anchor="${i === 0 ? 'start' : i === lastIdx ? 'end' : 'middle'}" fill="var(--ink2)" font-size="10" style="font-variant-numeric:tabular-nums">${f(p.v)}${unit || ''}</text>`;
+    }
+    dots += `<rect class="bar-hit" x="${(X(i) - (W / points.length) / 2).toFixed(1)}" y="0" width="${(W / points.length).toFixed(1)}" height="${H}" fill="transparent" data-tip="${esc(p.label)} ${f(p.v)}${unit || ''}"/>`;
+  });
+  return `
+  <svg class="weekbars" viewBox="0 0 ${W} ${H}" width="100%" role="img">
+    <line x1="${padX}" y1="${H - padB + .5}" x2="${W - padX}" y2="${H - padB + .5}" stroke="var(--baseline)" stroke-width="1"/>
+    <path d="${path}" fill="none" stroke="var(--c-p)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    ${dots}${labels}
+    <text x="${padX}" y="${H - 5}" fill="var(--muted)" font-size="9">${esc(points[0].label)}</text>
+    <text x="${W - padX}" y="${H - 5}" text-anchor="end" fill="var(--muted)" font-size="9">${esc(points[lastIdx].label)}</text>
+  </svg>`;
+}
+
 /* チャートのタップツールチップ（共有） */
 function initChartTips(root) {
   root.querySelectorAll('.bar-hit').forEach(el => {

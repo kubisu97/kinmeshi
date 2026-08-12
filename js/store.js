@@ -12,8 +12,13 @@ const DEFAULT_STATE = () => ({
     profile: { weight: 65, goal: 'keep' }, // goal: cut / keep / gain
     activity: 'mid', // low / mid / high（活動量）
     notifyTime: '21:00',
+    restSec: 90,     // レストタイマー秒数
   },
-  inbody: [],                    // {id, date, weight, bf, muscle, bmr}
+  inbody: [],                    // {id, date, weight, bf, muscle, bmr, seg, score}
+  routines: [],                  // {id, name, items:[{exId, sets:[{w,r}]}]}
+  mealFavs: [],                  // {id, name, kcal, p, f, c, items}
+  progressPhotos: [],            // {id(photoId), date}
+  weeklyReport: null,            // {date, text}
   customExercises: [],           // {id,name,muscle,unit}
   workouts: {},                  // 'YYYY-MM-DD': {entries:[{id,exId,sets:[{w,r,done}]}], memo}
   meals: {},                     // 'YYYY-MM-DD': [{id,time,name,kcal,p,f,c,photo,src,items,note}]
@@ -34,6 +39,10 @@ function loadState() {
       if (!state.meals) state.meals = {};
       if (!state.inbody) state.inbody = [];
       if (!state.settings.activity) state.settings.activity = 'mid';
+      if (!state.settings.restSec) state.settings.restSec = 90;
+      if (!state.routines) state.routines = [];
+      if (!state.mealFavs) state.mealFavs = [];
+      if (!state.progressPhotos) state.progressPhotos = [];
       return;
     }
   } catch (e) { console.warn('loadState failed', e); }

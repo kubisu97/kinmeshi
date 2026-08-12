@@ -168,6 +168,7 @@ function downscale(file, maxSize, quality) {
 function openManualMeal() {
   const hasKey = !!state.settings.apiKey;
   const body = sheet('食事を記録', `
+    ${mealFavChipsHtml()}
     ${hasKey ? `
     <div class="ai-text-box">
       <div class="qf-label">🤖 食べたものを書くだけでAIが計算</div>
@@ -196,6 +197,7 @@ function openManualMeal() {
     </div>
   `);
   const get = id => body.querySelector(id);
+  wireMealFavs(body);
 
   // AIテキスト解析
   const aiBtn = get('#mm-ai-btn');
@@ -223,7 +225,7 @@ function openManualMeal() {
     aiBtn.disabled = false; aiBtn.textContent = 'AIにカロリーを計算してもらう';
   });
 
-  body.querySelectorAll('.qf-chip').forEach(chip => {
+  body.querySelectorAll('.qf-chip[data-qf]').forEach(chip => {
     chip.addEventListener('click', () => {
       const f = QUICK_FOODS[+chip.dataset.qf];
       const nameEl = get('#mm-name');
@@ -277,11 +279,20 @@ function openMealDetail(index) {
       <label class="f-label">時刻<input type="time" class="input" id="md-time" value="${esc(m.time || '')}"></label>
       <div class="btn-row">
         <button class="btn danger ghost" id="md-del">削除</button>
+        <button class="btn ghost" id="md-fav">⭐ マイ定食に</button>
         <button class="btn primary" id="md-save">保存する</button>
       </div>
     </div>
   `);
   loadThumbs(body);
+  body.querySelector('#md-fav').addEventListener('click', () => {
+    saveMealAsFav({
+      name: body.querySelector('#md-name').value.trim() || m.name,
+      kcal: body.querySelector('#md-kcal').value, p: body.querySelector('#md-p').value,
+      f: body.querySelector('#md-f').value, c: body.querySelector('#md-c').value,
+      items: m.items,
+    });
+  });
   body.querySelector('#md-save').addEventListener('click', () => {
     m.name = body.querySelector('#md-name').value.trim() || m.name;
     m.kcal = num(body.querySelector('#md-kcal').value);
@@ -303,4 +314,70 @@ function openMealDetail(index) {
       toast('削除しました');
     }
   });
+}
+
+/* ---------- マイ定食（お気に入り食事） ---------- */
+function mealFavChipsHtml() {
+  if (!state.mealFavs.length) return '';
+  return `
+    <div class="qf-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>⭐ マイ定食（タップで即記録）</span>
+      <button class="fav-edit-toggle" id="fav-edit">編集</button>
+    </div>
+    <div class="qf-grid" id="fav-grid">
+      ${state.mealFavs.map(f => `
+        <button class="qf-chip fav" data-fav="${f.id}">
+          ${esc(f.name)}<small>${Math.round(num(f.kcal))}kcal ・ P${Math.round(num(f.p))}</small>
+          <span class="fav-del" data-fav-del="${f.id}" style="display:none">✕</span>
+        </button>`).join('')}
+    </div>`;
+}
+
+function wireMealFavs(body) {
+  const editBtn = body.querySelector('#fav-edit');
+  if (!editBtn) return;
+  let editing = false;
+  editBtn.addEventListener('click', () => {
+    editing = !editing;
+    editBtn.textContent = editing ? '完了' : '編集';
+    body.querySelectorAll('.fav-del').forEach(x => x.style.display = editing ? 'flex' : 'none');
+  });
+  body.querySelectorAll('[data-fav]').forEach(chip => {
+    chip.addEventListener('click', async (ev) => {
+      const delBtn = ev.target.closest('[data-fav-del]');
+      const fav = state.mealFavs.find(f => f.id === chip.dataset.fav);
+      if (!fav) return;
+      if (delBtn) {
+        if (await confirmDlg(`マイ定食「${fav.name}」を削除しますか？`)) {
+          state.mealFavs = state.mealFavs.filter(f => f.id !== fav.id);
+          saveState();
+          closeSheet();
+          openManualMeal();
+        }
+        return;
+      }
+      if (editing) return;
+      if (!state.meals[App.mDate]) state.meals[App.mDate] = [];
+      state.meals[App.mDate].push({
+        id: uid(), time: nowTimeStr(), name: fav.name,
+        kcal: num(fav.kcal), p: num(fav.p), f: num(fav.f), c: num(fav.c),
+        photo: null, src: 'fav', items: fav.items || [],
+      });
+      saveState();
+      closeSheet();
+      renderCurrent();
+      toast(`⭐「${fav.name}」を記録しました`);
+    });
+  });
+}
+
+function saveMealAsFav(m) {
+  const name = m.name.trim();
+  if (!name) return;
+  const rec = { id: uid(), name, kcal: num(m.kcal), p: num(m.p), f: num(m.f), c: num(m.c), items: m.items || [] };
+  const idx = state.mealFavs.findIndex(f => f.name === name);
+  if (idx >= 0) state.mealFavs[idx] = { ...rec, id: state.mealFavs[idx].id };
+  else state.mealFavs.push(rec);
+  saveState();
+  toast(`⭐ マイ定食に保存しました`);
 }

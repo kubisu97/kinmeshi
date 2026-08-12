@@ -184,6 +184,40 @@ function mealSuggestions(date) {
   return out;
 }
 
+/* AI週間レポート用のサマリー */
+function buildWeeklySummary() {
+  const g = state.settings.targets;
+  const pf = state.settings.profile;
+  const goalJa = { cut: '減量', keep: '維持', gain: '増量' }[pf.goal] || '維持';
+  const L = [];
+  L.push(`目的: ${goalJa} / 目標: ${g.kcal}kcal P${g.p} F${g.f} C${g.c}`);
+  const ib = latestInbody();
+  if (ib) L.push(`最新InBody: 体重${ib.weight}kg${ib.bf != null ? ` 体脂肪率${ib.bf}%` : ''}${ib.muscle != null ? ` 骨格筋量${ib.muscle}kg` : ''}`);
+  L.push('', '■この7日間');
+  let totalVol = 0, trainDays = 0, kcalSum = 0, kcalDays = 0, pSum = 0;
+  for (let i = 6; i >= 0; i--) {
+    const d = addDays(todayStr(), -i);
+    const parts = [];
+    const vol = workoutVolume(d);
+    const sets = workoutDoneSets(d);
+    const cMin = cardioMinutes(d);
+    if (sets > 0) {
+      trainDays++;
+      totalVol += vol;
+      parts.push(`筋トレ${sets}セット${vol ? `(${Math.round(vol)}kg)` : ''}${cMin ? ` 有酸素${cMin}分` : ''} [${workoutMuscles(d).map(k => MUSCLES[k].label).join('・')}]`);
+    }
+    const t = mealTotals(d);
+    if (mealsOf(d).length) {
+      kcalDays++;
+      kcalSum += t.kcal; pSum += t.p;
+      parts.push(`食事${Math.round(t.kcal)}kcal P${Math.round(t.p)}`);
+    }
+    if (parts.length) L.push(`${fmtDateJa(d)}: ${parts.join(' / ')}`);
+  }
+  L.push('', `週合計: トレ${trainDays}日 総ボリューム${Math.round(totalVol).toLocaleString()}kg / 食事記録${kcalDays}日 平均${kcalDays ? Math.round(kcalSum / kcalDays) : 0}kcal 平均P${kcalDays ? Math.round(pSum / kcalDays) : 0}g`);
+  return L.join('\n');
+}
+
 /* AIコーチ用のサマリー文字列を作る */
 function buildCoachSummary() {
   const lines = [];

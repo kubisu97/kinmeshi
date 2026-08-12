@@ -46,6 +46,7 @@ function init() {
     App.photoTarget = 'meal';
     if (!f) return;
     if (target === 'inbody') handleInBodyPhoto(f);
+    else if (target === 'progress') handleProgressPhoto(f);
     else handlePhotoFile(f);
   });
 
@@ -90,6 +91,7 @@ function init() {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
+  initRestTimer();
   switchTab('home');
 }
 

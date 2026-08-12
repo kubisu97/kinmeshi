@@ -216,6 +216,22 @@ async function aiWorkoutMenu(prompt) {
   return obj;
 }
 
+/* ---------- AI週間レポート ---------- */
+async function aiWeeklyReport(summary) {
+  const prompt = `あなたは優秀なパーソナルトレーナー兼管理栄養士です。以下は私の1週間の記録です。
+
+${summary}
+
+この1週間の週間レポートを日本語で書いてください。構成:
+🏆 今週のハイライト（1〜2行。数字で褒める）
+🏋️ トレーニング評価（ボリューム・部位バランス・2〜3行）
+🍽 食事評価（目標との差・PFCバランス・2〜3行）
+🎯 来週の方針（具体的に3つまで。種目名・重量・食品名レベルで）
+
+全体で400字以内。マークダウンの見出し記号は使わず、上の絵文字付き見出しをそのまま使うこと。`;
+  return await geminiGenerate([{ text: prompt }], false);
+}
+
 /* ---------- モデル一覧（接続テスト） ---------- */
 async function geminiListModels() {
   if (!geminiKey()) throw new Error('NO_KEY');

@@ -54,6 +54,19 @@ function renderCalendar(el) {
     </div>
     <div class="cal-legend"><span><i class="cd w"></i> 筋トレ</span><span><i class="cd m"></i> 食事</span></div>
     <div id="cal-detail">${calDetailHtml(App.calSel)}</div>
+
+    <h2 class="section-title">体組成の推移</h2>
+    <section class="card">${inbodyTrendHtml()}</section>
+
+    <h2 class="section-title">進捗写真</h2>
+    <section class="card">${progressPhotosHtml()}</section>
+
+    <section class="card coach-card">
+      <h2 class="card-title">📋 AI週間レポート</h2>
+      <div class="sug-body" id="wr-out">${state.weeklyReport ? esc(state.weeklyReport.text) : 'この1週間のトレーニングと食事をAIが総括して、来週の方針を提案します。'}</div>
+      ${state.weeklyReport ? `<div class="hint">生成日: ${esc(state.weeklyReport.date)}</div>` : ''}
+      <button class="btn ghost small" id="wr-btn">${state.weeklyReport ? 'もう一度生成' : '今週のレポートを生成'}</button>
+    </section>
   `;
 
   el.querySelector('#cal-prev').addEventListener('click', () => { App.calMonth = calShiftMonth(ym, -1); renderCalendar(el); });
@@ -65,6 +78,10 @@ function renderCalendar(el) {
     c.addEventListener('click', () => { App.calSel = c.dataset.d; renderCalendar(el); });
   });
   wireCalDetail(el);
+  wireProgressPhotos(el);
+  wireWeeklyReport(el);
+  loadThumbs(el);
+  initChartTips(el);
 }
 
 function calDetailHtml(dstr) {
@@ -115,4 +132,99 @@ function wireCalDetail(el) {
   if (ow) ow.addEventListener('click', () => { App.wDate = App.calSel; switchTab('workout'); });
   const om = el.querySelector('#cal-open-meals');
   if (om) om.addEventListener('click', () => { App.mDate = App.calSel; switchTab('meals'); });
+}
+
+/* ---------- 体組成の推移 ---------- */
+function inbodyTrendHtml() {
+  const recs = [...state.inbody].filter(r => r.date).sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
+  const mk = (key, label, unit) => {
+    const pts = recs.filter(r => r[key] != null).map(r => ({ v: num(r[key]), label: fmtDateJa(r.date) }));
+    if (pts.length < 2) return '';
+    return `<div class="trend-label">${label}</div>${lineChart({ points: pts, unit })}`;
+  };
+  const charts = mk('weight', '体重', 'kg') + mk('bf', '体脂肪率', '%') + mk('muscle', '骨格筋量', 'kg');
+  return charts || '<div class="empty-note small">InBodyを2回以上取り込むと推移グラフが表示されます（設定タブ→InBody連携）</div>';
+}
+
+/* ---------- 進捗写真 ---------- */
+function progressPhotosHtml() {
+  const list = [...state.progressPhotos].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  return `
+    <div class="pp-grid">
+      ${list.map(p => `<button class="pp-cell" data-pp="${p.id}"><img data-photo="${p.id}" alt=""><span>${esc((p.date || '').slice(2))}</span></button>`).join('')}
+      <button class="pp-cell pp-add" id="pp-add">📷<span>追加</span></button>
+    </div>
+    ${list.length >= 2 ? '<button class="btn ghost small" id="pp-compare" style="margin-top:8px">最初と最新を比較</button>' : ''}
+    ${list.length ? '' : '<div class="hint">月1回、同じ場所・同じポーズで撮ると変化がわかりやすい。写真はこのiPhoneの中にだけ保存されます。</div>'}`;
+}
+
+function wireProgressPhotos(el) {
+  const add = el.querySelector('#pp-add');
+  if (add) add.addEventListener('click', () => {
+    App.photoTarget = 'progress';
+    document.getElementById('photo-input').click();
+  });
+  el.querySelectorAll('[data-pp]').forEach(c => c.addEventListener('click', () => openProgressPhoto(c.dataset.pp)));
+  const cmp = el.querySelector('#pp-compare');
+  if (cmp) cmp.addEventListener('click', () => {
+    const list = [...state.progressPhotos].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const a = list[0], b = list[list.length - 1];
+    const body = sheet('進捗の比較', `
+      <div class="pp-compare">
+        <div><img data-photo="${a.id}" alt=""><span>${esc(a.date)}</span></div>
+        <div><img data-photo="${b.id}" alt=""><span>${esc(b.date)}</span></div>
+      </div>`);
+    loadThumbs(body);
+  });
+}
+
+async function handleProgressPhoto(file) {
+  if (!file) return;
+  try {
+    const img = await downscale(file, 900, 0.8);
+    const photoId = uid();
+    await photoPut(photoId, img);
+    state.progressPhotos.push({ id: photoId, date: todayStr() });
+    saveState();
+    renderCurrent();
+    toast('進捗写真を保存しました 📸');
+  } catch (e) { toast('画像を読み込めませんでした'); }
+}
+
+function openProgressPhoto(id) {
+  const p = state.progressPhotos.find(x => x.id === id);
+  if (!p) return;
+  const body = sheet(`📸 ${p.date}`, `
+    <img class="pp-full" data-photo="${p.id}" alt="">
+    <div class="btn-row"><button class="btn danger ghost" id="pp-del">削除</button></div>`);
+  loadThumbs(body);
+  body.querySelector('#pp-del').addEventListener('click', async () => {
+    if (await confirmDlg('この進捗写真を削除しますか？')) {
+      await photoDel(p.id);
+      state.progressPhotos = state.progressPhotos.filter(x => x.id !== id);
+      saveState();
+      closeSheet();
+      renderCurrent();
+    }
+  });
+}
+
+/* ---------- AI週間レポート ---------- */
+function wireWeeklyReport(el) {
+  const btn = el.querySelector('#wr-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const out = el.querySelector('#wr-out');
+    if (!state.settings.apiKey) { out.textContent = '設定タブでGemini APIキー（無料）を設定すると使えます。'; return; }
+    btn.disabled = true; btn.textContent = 'AIが1週間を分析中…';
+    try {
+      const text = await aiWeeklyReport(buildWeeklySummary());
+      state.weeklyReport = { date: todayStr(), text: text.trim() };
+      saveState();
+      out.textContent = state.weeklyReport.text;
+    } catch (e) {
+      out.textContent = `エラー: ${e.message === 'NO_KEY' ? 'APIキーを設定してください' : e.message}`;
+    }
+    btn.disabled = false; btn.textContent = 'もう一度生成';
+  });
 }
