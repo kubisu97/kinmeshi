@@ -116,7 +116,7 @@ async function analyzeMealPhoto(dataUrl) {
 }
 
 /* ---------- InBody結果用紙の読み取り ---------- */
-const INBODY_PROMPT = `この画像は体成分分析（InBodyなど）の結果用紙です。次の項目を読み取ってください。
+const INBODY_PROMPT = `この画像は体成分分析（InBodyなど）の結果用紙、またはInBodyアプリの画面スクリーンショットです。次の項目を読み取ってください。
 必ず次のJSON形式だけで回答してください（説明文は不要）:
 {
   "date": "測定日をYYYY-MM-DD形式で。読み取れなければnull",

@@ -43,9 +43,22 @@ function renderSettings(el) {
       <div class="form-grid">
         <div id="ib-latest">${inbodyLatestHtml()}</div>
         <div class="btn-row">
-          <button class="btn ghost small" id="ib-photo">📷 結果用紙を読み取る</button>
-          <button class="btn ghost small" id="ib-manual">手動で入力</button>
+          <button class="btn ghost small" id="ib-photo">📷 用紙/画面を読み取る</button>
+          <button class="btn ghost small" id="ib-clip">📋 取り込み</button>
+          <button class="btn ghost small" id="ib-manual">手動</button>
         </div>
+        <details class="guide">
+          <summary>InBodyアプリと自動連携する（初回のみ3分）</summary>
+          <ol class="guide-steps">
+            <li><b>InBodyアプリ</b>の設定で「ヘルスケア連携（Apple Health）」をON。測定データがiPhoneのヘルスケアに入るようになります</li>
+            <li><b>ショートカット</b>アプリ →「＋」で新規作成 → 名前を「InBody取り込み」に</li>
+            <li>アクション「<b>ヘルスケアサンプルを検索</b>」を追加 → 種類「<b>体重</b>」・並び順「開始日」降順・上限「1」</li>
+            <li>同じアクションをもう一度追加 → 種類「<b>体脂肪率</b>」・同じ設定</li>
+            <li>アクション「<b>テキスト</b>」を追加して次のように入力（〔〕は上の結果の変数を選ぶ）:<br>体重: 〔体重のサンプル〕<br>体脂肪率: 〔体脂肪率のサンプル〕</li>
+            <li>アクション「<b>クリップボードにコピー</b>」を追加して完了</li>
+            <li><b>使い方</b>: 測定後にショートカットを実行 → 筋メシのこの画面で「📋 取り込み」。ショートカットをホーム画面に置けば1タップです</li>
+          </ol>
+        </details>
         <div class="grid2">
           <label class="f-label">活動量
             <select class="input" id="st-activity">
@@ -160,6 +173,7 @@ function renderSettings(el) {
     document.getElementById('photo-input').click();
   });
   $('#ib-manual').addEventListener('click', openInbodyManual);
+  $('#ib-clip').addEventListener('click', importInbodyFromClipboard);
   $('#st-activity').addEventListener('change', () => { state.settings.activity = $('#st-activity').value; saveState(); });
   const ibCalc = $('#ib-calc');
   if (ibCalc) ibCalc.addEventListener('click', () => {
@@ -351,4 +365,46 @@ async function handleInBodyPhoto(file) {
       document.getElementById('photo-input').click();
     });
   }
+}
+
+/* クリップボード（ショートカット経由のヘルスケアデータ等）から取り込み */
+function parseInbodyText(text) {
+  const pick = (re) => { const m = text.match(re); return m ? Number(m[1].replace(/,/g, '')) : null; };
+  const weight = pick(/体重[^\d]*([\d.]+)/) ?? pick(/weight[^\d]*([\d.]+)/i);
+  const bf = pick(/体脂肪率?[^\d]*([\d.]+)/) ?? pick(/body ?fat[^\d]*([\d.]+)/i);
+  const muscle = pick(/骨格筋量?[^\d]*([\d.]+)/);
+  const bmr = pick(/基礎代謝量?[^\d]*([\d,]+)/);
+  let date = todayStr();
+  const dm = text.match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/);
+  if (dm) date = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
+  if (weight == null) return null;
+  return { date, weight, bf, muscle, bmr: bmr ? Math.round(bmr) : null };
+}
+
+async function importInbodyFromClipboard() {
+  let text = '';
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (e) {
+    toast('クリップボードを読めませんでした。もう一度タップして許可してください');
+    return;
+  }
+  const r = parseInbodyText(text || '');
+  if (!r) {
+    toast('体重のデータが見つかりません。上のガイドの手順でショートカットを実行してから押してください');
+    return;
+  }
+  const body = sheet('取り込み内容の確認', `
+    <div class="an-note">クリップボードから読み取りました。確認して保存してください。</div>
+    <div class="form-grid">
+      ${inbodyFormHtml(r)}
+      <div class="btn-row">
+        <button class="btn ghost" id="ib-cancel">キャンセル</button>
+        <button class="btn primary" id="ib-save">保存する</button>
+      </div>
+    </div>`);
+  body.querySelector('#ib-cancel').addEventListener('click', closeSheet);
+  body.querySelector('#ib-save').addEventListener('click', () => {
+    if (saveInbodyFromForm(body)) { closeSheet(); renderCurrent(); toast('InBodyを取り込みました 💪'); }
+  });
 }
