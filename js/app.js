@@ -86,13 +86,36 @@ function init() {
     navigator.storage.persist().catch(() => {});
   }
 
-  // Service Worker
+  // Service Worker（更新の自動チェック＋更新バナー）
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      const check = () => { reg.update().catch(() => {}); };
+      // 起動時・アプリ復帰時・1時間ごとに更新チェック
+      check();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+      setInterval(check, 60 * 60 * 1000);
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'activated') showUpdateBar();
+        });
+      });
+    }).catch(() => {});
   }
 
   initRestTimer();
   switchTab('home');
+}
+
+/* 新バージョン通知バナー */
+function showUpdateBar() {
+  if (document.getElementById('update-bar')) return;
+  const bar = document.createElement('button');
+  bar.id = 'update-bar';
+  bar.textContent = '🎁 新しいバージョンがあります — タップで更新';
+  bar.addEventListener('click', () => location.reload());
+  document.body.appendChild(bar);
 }
 
 document.addEventListener('DOMContentLoaded', init);
