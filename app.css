@@ -393,3 +393,58 @@ select.input { appearance: none; }
 .menu-item .ex-art { width: 44px; height: 44px; flex: none; }
 .menu-item-t b { display: block; font-size: 14px; }
 .menu-item-t span { font-size: 12px; color: var(--ink2); }
+
+/* ---------- レストタイマー ---------- */
+#rest-timer {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+  z-index: 45; display: flex; align-items: center; gap: 8px;
+  background: var(--surface-2); border: 1px solid var(--c-p);
+  border-radius: 999px; padding: 8px 12px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.5);
+  max-width: 94vw;
+}
+#rest-timer .rt-label { font-size: 12px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
+#rest-timer .rt-time { font-size: 20px; font-weight: 800; color: var(--c-p); font-variant-numeric: tabular-nums; min-width: 52px; text-align: center; }
+#rest-timer .rt-set {
+  background: var(--bg); color: var(--ink2); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 12px; padding: 4px 2px; font-family: inherit;
+}
+#rest-timer button {
+  appearance: none; background: var(--bg); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 999px;
+  font-size: 12px; font-weight: 700; padding: 6px 10px; cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.ex-head-btns { display: flex; gap: 6px; flex: none; }
+
+/* ---------- 推移グラフ・成長 ---------- */
+.trend-label { font-size: 12px; font-weight: 700; color: var(--muted); margin: 10px 2px 2px; }
+.trend-label:first-child { margin-top: 0; }
+.trend-best { font-size: 14px; color: var(--ink2); margin-bottom: 8px; }
+.trend-best b { font-size: 18px; color: var(--c-p); }
+
+/* ---------- 進捗写真 ---------- */
+.pp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.pp-cell {
+  position: relative; aspect-ratio: 3/4; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--surface-2); padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  color: var(--muted); font-size: 18px; font-family: inherit;
+}
+.pp-cell img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pp-cell span { position: relative; z-index: 1; font-size: 9px; font-weight: 700; color: #fff; background: rgba(0,0,0,.55); padding: 1px 6px; border-radius: 999px; margin-top: auto; margin-bottom: 4px; }
+.pp-cell.pp-add span { position: static; background: none; color: var(--muted); margin: 0; }
+.pp-full { width: 100%; border-radius: 12px; border: 1px solid var(--border); }
+.pp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pp-compare img { width: 100%; border-radius: 10px; border: 1px solid var(--border); }
+.pp-compare span { display: block; text-align: center; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.pp-compare > div { min-width: 0; }
+
+/* ---------- マイ定食 ---------- */
+.qf-chip.fav { position: relative; border-color: var(--c-p); }
+.fav-del {
+  position: absolute; top: -6px; right: -6px; width: 22px; height: 22px;
+  background: var(--crit); color: #fff; border-radius: 50%;
+  align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+}
+.fav-edit-toggle { appearance: none; background: none; border: none; color: var(--c-p); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }

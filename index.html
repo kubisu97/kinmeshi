@@ -28,6 +28,18 @@
   </div>
 
   <div id="modal-root"></div>
+  <div id="rest-timer" style="display:none">
+    <span class="rt-label">☕ 休憩</span>
+    <span class="rt-time">1:30</span>
+    <select class="rt-set" id="rt-sec" aria-label="休憩秒数">
+      <option value="60">60秒</option>
+      <option value="90" selected>90秒</option>
+      <option value="120">120秒</option>
+      <option value="180">180秒</option>
+    </select>
+    <button id="rt-plus">+30秒</button>
+    <button id="rt-skip">スキップ</button>
+  </div>
   <div id="toast" role="status"></div>
   <div id="chart-tip"></div>
   <input type="file" id="photo-input" accept="image/*" hidden>

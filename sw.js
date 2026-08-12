@@ -1,5 +1,5 @@
 /* 筋メシ - Service Worker（オフライン対応） */
-const CACHE = 'kinmeshi-v1.7.0';
+const CACHE = 'kinmeshi-v2.0.0';
 const ASSETS = [
   './',
   './index.html',
