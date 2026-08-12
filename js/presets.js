@@ -56,6 +56,26 @@ const PRESET_EXERCISES = [
   { id: 'px62', name: 'エアロバイク',            muscle: 'cardio',    unit: 'min' },
   { id: 'px63', name: '水泳',                    muscle: 'cardio',    unit: 'min' },
   { id: 'px64', name: '縄跳び',                  muscle: 'cardio',    unit: 'min' },
+  /* ▼ 通っているジムのマシン（ホリデイ草津・LifeFit広島駅北） */
+  { id: 'px70', name: 'ペックフライ',              muscle: 'chest',     unit: 'kg' },
+  { id: 'px71', name: 'デルツマシン（リアデルト）', muscle: 'shoulders', unit: 'kg' },
+  { id: 'px72', name: 'マシンアームカール',        muscle: 'arms',      unit: 'kg' },
+  { id: 'px73', name: 'アームエクステンション',    muscle: 'arms',      unit: 'kg' },
+  { id: 'px74', name: 'アブドミナルクランチ',      muscle: 'core',      unit: 'kg' },
+  { id: 'px75', name: 'ロータリートーソ',          muscle: 'core',      unit: 'kg' },
+  { id: 'px76', name: 'トータルアブドミナル',      muscle: 'core',      unit: 'kg' },
+  { id: 'px77', name: 'ヴァーティカルトラクション', muscle: 'back',     unit: 'kg' },
+  { id: 'px78', name: 'アッパーバック',            muscle: 'back',      unit: 'kg' },
+  { id: 'px79', name: 'ローワーバック',            muscle: 'back',      unit: 'kg' },
+  { id: 'px80', name: 'マルチヒップ',              muscle: 'legs',      unit: 'kg' },
+  { id: 'px81', name: 'アブダクター（外もも）',    muscle: 'legs',      unit: 'kg' },
+  { id: 'px82', name: 'アダクター（内もも）',      muscle: 'legs',      unit: 'kg' },
+  { id: 'px83', name: 'グルートマシン',            muscle: 'legs',      unit: 'kg' },
+  { id: 'px84', name: 'ロータリーカーフ',          muscle: 'legs',      unit: 'kg' },
+  { id: 'px85', name: 'スミスマシンスクワット',    muscle: 'legs',      unit: 'kg' },
+  { id: 'px87', name: 'クロストレーナー',          muscle: 'cardio',    unit: 'min' },
+  { id: 'px88', name: 'リクラインバイク',          muscle: 'cardio',    unit: 'min' },
+  { id: 'px89', name: 'ステップマシン',            muscle: 'cardio',    unit: 'min' },
 ];
 
 /* よく食べるもの（1人前のめやす。保存前に編集可能） */

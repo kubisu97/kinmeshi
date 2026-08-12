@@ -30,10 +30,12 @@ function nextTarget(exId, date) {
 }
 
 /* 有酸素のペース表示（種目に応じて単位を変える） */
+const CARDIO_SPEED_IDS = ['px62', 'px87', 'px88'];   // バイク・クロストレーナー系=km/h
+const CARDIO_NODIST_IDS = ['px64', 'px89'];          // 縄跳び・ステップ=時間のみ
 function cardioPaceText(ex, min, km) {
   min = num(min); km = num(km);
   if (!min || !km) return '';
-  if (ex.id === 'px62') return (km / (min / 60)).toFixed(1) + 'km/h';          // バイク=速度
+  if (CARDIO_SPEED_IDS.includes(ex.id)) return (km / (min / 60)).toFixed(1) + 'km/h'; // 速度表示
   if (ex.id === 'px63') {                                                       // 水泳=/100m
     const sec100 = (min * 60) / (km * 10);
     return `${Math.floor(sec100 / 60)}'${String(Math.round(sec100 % 60)).padStart(2, '0')}"/100m`;
@@ -43,7 +45,7 @@ function cardioPaceText(ex, min, km) {
   if (s === 60) { m += 1; s = 0; }
   return `${m}'${String(s).padStart(2, '0')}"/km`;
 }
-function isCardioDistance(ex) { return ex.muscle === 'cardio' && ex.id !== 'px64'; } // 縄跳びは時間のみ
+function isCardioDistance(ex) { return ex.muscle === 'cardio' && !CARDIO_NODIST_IDS.includes(ex.id); }
 
 function fmtSets(sets, unit, ex) {
   return sets.map(s => {

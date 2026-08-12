@@ -311,6 +311,25 @@
     P('M22 56 H42', G, 2.4),
   ];
 
+  /* ロータリートーソ（体幹ひねり） */
+  A.torso = [
+    P('M24 46 H40', S, 3.6),                                      // シート
+    HEAD(32, 12), P('M32 17 L32 44', F),
+    P('M32 22 L24 28 M32 22 L40 28', F),                          // 腕（胸の前）
+    P('M14 30 A 18 18 0 0 1 24 16', E, 2.4),                      // 回転矢印（左）
+    P('M24 16 L19 16 M24 16 L24 21', E, 2.4),
+    P('M50 30 A 18 18 0 0 0 40 16', E, 2.4),                      // 回転矢印（右）
+    P('M40 16 L45 16 M40 16 L40 21', E, 2.4),
+  ];
+  /* アブダクター/アダクター（脚の開閉） */
+  A.abadd = [
+    P('M22 30 H42', S, 3.6),                                      // シート
+    HEAD(32, 10), P('M32 15 L32 30', F),
+    P('M32 30 L23 42 L23 54', F), P('M32 30 L41 42 L41 54', F),   // 開いた脚
+    P('M17 46 L11 46 M14 43 L11 46 L14 49', E, 2.4),              // 外向き矢印
+    P('M47 46 L53 46 M50 43 L53 46 L50 49', E, 2.4),
+  ];
+
   /* ===== 汎用（カスタム種目用） ===== */
   A.generic = [
     P('M14 32 H50', E, 3.4),
@@ -329,6 +348,10 @@
     px40: 'curl', px41: 'curl', px42: 'curl', px43: 'triext', px44: 'pressdown', px45: 'bench',
     px50: 'plank', px51: 'crunch', px52: 'legraise', px53: 'abroller', px54: 'sideplank',
     px60: 'run', px61: 'walk', px62: 'bike', px63: 'swim', px64: 'rope',
+    px70: 'fly', px71: 'rearraise', px72: 'curl', px73: 'triext', px74: 'crunch',
+    px75: 'torso', px76: 'crunch', px77: 'latpull', px78: 'seatedrow', px79: 'generic',
+    px80: 'generic', px81: 'abadd', px82: 'abadd', px83: 'hipthrust', px84: 'calf',
+    px85: 'squat', px87: 'run', px88: 'bike', px89: 'walk',
   };
 
   window.exArt = function (exId, cls = '') {
