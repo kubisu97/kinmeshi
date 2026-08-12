@@ -7,6 +7,7 @@ const App = {
   mDate: null,
   calMonth: null,
   calSel: null,
+  photoTarget: 'meal',
 };
 
 function switchTab(tab) {
@@ -37,11 +38,15 @@ function init() {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
 
-  // 写真入力
+  // 写真入力（食事 / InBody）
   document.getElementById('photo-input').addEventListener('change', e => {
     const f = e.target.files && e.target.files[0];
     e.target.value = '';
-    if (f) handlePhotoFile(f);
+    const target = App.photoTarget || 'meal';
+    App.photoTarget = 'meal';
+    if (!f) return;
+    if (target === 'inbody') handleInBodyPhoto(f);
+    else handlePhotoFile(f);
   });
 
   // バックアップ読み込み

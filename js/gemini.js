@@ -115,6 +115,36 @@ async function analyzeMealPhoto(dataUrl) {
   };
 }
 
+/* ---------- InBody結果用紙の読み取り ---------- */
+const INBODY_PROMPT = `この画像は体成分分析（InBodyなど）の結果用紙です。次の項目を読み取ってください。
+必ず次のJSON形式だけで回答してください（説明文は不要）:
+{
+  "date": "測定日をYYYY-MM-DD形式で。読み取れなければnull",
+  "weight": 体重kgの数値またはnull,
+  "bf": 体脂肪率%の数値またはnull,
+  "muscle": 骨格筋量kgの数値またはnull,
+  "bmr": 基礎代謝量kcalの数値またはnull
+}
+体成分の結果用紙でない場合は {"weight": null} とだけ回答してください。`;
+
+async function analyzeInBodyPhoto(dataUrl) {
+  const m = dataUrl.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/s);
+  if (!m) throw new Error('画像の読み込みに失敗しました');
+  const text = await geminiGenerate([
+    { inlineData: { mimeType: m[1], data: m[2] } },
+    { text: INBODY_PROMPT },
+  ], true);
+  const obj = parseJsonLoose(text);
+  if (!obj || obj.weight == null) throw new Error('InBodyの結果用紙を認識できませんでした。用紙全体が明るく写るように撮ってみてください。');
+  return {
+    date: obj.date || todayStr(),
+    weight: num(obj.weight) || null,
+    bf: obj.bf != null ? round1(num(obj.bf)) : null,
+    muscle: obj.muscle != null ? round1(num(obj.muscle)) : null,
+    bmr: obj.bmr != null ? Math.round(num(obj.bmr)) : null,
+  };
+}
+
 /* ---------- AIコーチ（テキスト） ---------- */
 async function aiCoachAdvice(summary) {
   const prompt = `あなたは優秀なパーソナルトレーナー兼管理栄養士です。以下は私のトレーニングと食事の記録です。

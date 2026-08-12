@@ -219,12 +219,18 @@ function renderWorkout(el) {
 
 /* 種目追加シート */
 function openAddExercise(date, screenEl) {
+  let gymF = 'all';
   let filter = 'all';
   let q = '';
   const body = sheet('種目を追加', `
-    <input type="search" class="input" id="ex-search" placeholder="種目名で検索">
+    <input type="search" class="input" id="ex-search" placeholder="種目名・マシン名で検索">
+    <div class="chip-row" id="gym-chips">
+      <button class="chip gym sel" data-g="all">すべて</button>
+      <button class="chip gym" data-g="h">🏢 ${GYMS.h}</button>
+      <button class="chip gym" data-g="l">🏢 ${GYMS.l}</button>
+    </div>
     <div class="chip-row" id="muscle-chips">
-      <button class="chip sel" data-m="all">すべて</button>
+      <button class="chip sel" data-m="all">全部位</button>
       ${Object.keys(MUSCLES).map(k => `<button class="chip" data-m="${k}">${MUSCLES[k].label}</button>`).join('')}
     </div>
     <div class="ex-list" id="ex-list"></div>
@@ -250,18 +256,29 @@ function openAddExercise(date, screenEl) {
     const w = workoutOf(date);
     const inToday = new Set(w ? w.entries.map(e => e.exId) : []);
     const items = allExercises()
+      .filter(e => gymF === 'all' || (e.gyms || []).includes(gymF))
       .filter(e => filter === 'all' || e.muscle === filter)
-      .filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()));
-    listEl.innerHTML = items.map(e => {
-      const last = lastSessionOf(e.id, date);
-      return `
-      <button class="ex-item ${inToday.has(e.id) ? 'added' : ''}" data-id="${e.id}">
-        <span class="ex-item-art">${exArt(e.id)}</span>
-        <span class="ex-item-name">${esc(e.name)}</span>
-        <span class="ex-item-meta">${MUSCLES[e.muscle].label}${last ? ` ・ 前回 ${esc(fmtSets(last.sets, e.unit, e))}` : ''}</span>
-        <span class="ex-item-add">${inToday.has(e.id) ? '追加済' : '＋'}</span>
-      </button>`;
-    }).join('') || '<div class="empty-note small">見つかりません。下からカスタム種目を作れます。</div>';
+      .filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()) || (e.desc || '').includes(q));
+
+    // 部位ごとにグループ表示
+    let html = '';
+    for (const mk of Object.keys(MUSCLES)) {
+      const group = items.filter(e => e.muscle === mk);
+      if (!group.length) continue;
+      if (!(filter !== 'all')) html += `<div class="ex-group">${MUSCLES[mk].label}</div>`;
+      html += group.map(e => {
+        const last = lastSessionOf(e.id, date);
+        return `
+        <button class="ex-item ${inToday.has(e.id) ? 'added' : ''}" data-id="${e.id}">
+          <span class="ex-item-art">${exArt(e.id)}</span>
+          <span class="ex-item-name">${esc(e.name)}</span>
+          <span class="ex-item-desc">${esc(e.desc || MUSCLES[e.muscle].label)}</span>
+          ${last ? `<span class="ex-item-last">前回 ${esc(fmtSets(last.sets, e.unit, e))}</span>` : ''}
+          <span class="ex-item-add">${inToday.has(e.id) ? '追加済' : '＋'}</span>
+        </button>`;
+      }).join('');
+    }
+    listEl.innerHTML = html || '<div class="empty-note small">見つかりません。下からカスタム種目を作れます。</div>';
     listEl.querySelectorAll('.ex-item').forEach(btn => {
       btn.addEventListener('click', () => addExerciseToDay(btn.dataset.id));
     });
@@ -282,6 +299,14 @@ function openAddExercise(date, screenEl) {
   };
 
   body.querySelector('#ex-search').addEventListener('input', e => { q = e.target.value; renderList(); });
+  body.querySelectorAll('#gym-chips .chip').forEach(c => {
+    c.addEventListener('click', () => {
+      body.querySelectorAll('#gym-chips .chip').forEach(x => x.classList.remove('sel'));
+      c.classList.add('sel');
+      gymF = c.dataset.g;
+      renderList();
+    });
+  });
   body.querySelectorAll('#muscle-chips .chip').forEach(c => {
     c.addEventListener('click', () => {
       body.querySelectorAll('#muscle-chips .chip').forEach(x => x.classList.remove('sel'));

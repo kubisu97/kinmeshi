@@ -72,6 +72,7 @@ function openMealPhoto() {
     body.querySelector('#np-manual').addEventListener('click', () => { closeSheet(); openManualMeal(); });
     return;
   }
+  App.photoTarget = 'meal';
   document.getElementById('photo-input').click();
 }
 

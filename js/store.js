@@ -10,8 +10,10 @@ const DEFAULT_STATE = () => ({
     model: 'gemini-3.5-flash',
     targets: { kcal: 2200, p: 130, f: 60, c: 270 },
     profile: { weight: 65, goal: 'keep' }, // goal: cut / keep / gain
+    activity: 'mid', // low / mid / high（活動量）
     notifyTime: '21:00',
   },
+  inbody: [],                    // {id, date, weight, bf, muscle, bmr}
   customExercises: [],           // {id,name,muscle,unit}
   workouts: {},                  // 'YYYY-MM-DD': {entries:[{id,exId,sets:[{w,r,done}]}], memo}
   meals: {},                     // 'YYYY-MM-DD': [{id,time,name,kcal,p,f,c,photo,src,items,note}]
@@ -30,6 +32,8 @@ function loadState() {
       if (!state.customExercises) state.customExercises = [];
       if (!state.workouts) state.workouts = {};
       if (!state.meals) state.meals = {};
+      if (!state.inbody) state.inbody = [];
+      if (!state.settings.activity) state.settings.activity = 'mid';
       return;
     }
   } catch (e) { console.warn('loadState failed', e); }
@@ -155,6 +159,16 @@ function streakDays() {
   if (!hasLog(d)) d = addDays(d, -1); // 今日まだでも昨日から継続中なら数える
   while (hasLog(d)) { n++; d = addDays(d, -1); }
   return n;
+}
+
+/* ---------- InBody ---------- */
+function latestInbody() {
+  if (!state.inbody || !state.inbody.length) return null;
+  return [...state.inbody].sort((a, b) => (a.date || '').localeCompare(b.date || '')).pop();
+}
+function addInbody(rec) {
+  state.inbody.push({ id: uid(), ...rec });
+  saveState();
 }
 
 /* ---------- 写真（IndexedDB） ---------- */

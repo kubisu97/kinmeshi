@@ -39,6 +39,42 @@ function renderSettings(el) {
     </section>
 
     <section class="card">
+      <h2 class="card-title">InBody連携</h2>
+      <div class="form-grid">
+        <div id="ib-latest">${inbodyLatestHtml()}</div>
+        <div class="btn-row">
+          <button class="btn ghost small" id="ib-photo">📷 結果用紙を読み取る</button>
+          <button class="btn ghost small" id="ib-manual">手動で入力</button>
+        </div>
+        <div class="grid2">
+          <label class="f-label">活動量
+            <select class="input" id="st-activity">
+              <option value="low" ${s.activity === 'low' ? 'selected' : ''}>低め（運動は週1〜2）</option>
+              <option value="mid" ${s.activity === 'mid' ? 'selected' : ''}>普通（週2〜3トレ）</option>
+              <option value="high" ${s.activity === 'high' ? 'selected' : ''}>高め（週4以上）</option>
+            </select>
+          </label>
+          <label class="f-label">目標に反映
+            <button class="btn primary" id="ib-calc" ${latestInbody() ? '' : 'disabled'}>InBodyから計算</button>
+          </label>
+        </div>
+        <div class="hint">基礎代謝×活動量から目標カロリー、除脂肪体重からタンパク質目標を計算します。測定のたびに読み取れば履歴も残ります。</div>
+        ${state.inbody.length ? `
+        <details class="guide">
+          <summary>測定履歴（${state.inbody.length}件）</summary>
+          <div id="ib-history">
+            ${[...state.inbody].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(r => `
+              <div class="ib-row">
+                <span>${esc(r.date || '?')}</span>
+                <span class="ib-row-v">${r.weight != null ? r.weight + 'kg' : ''} ${r.bf != null ? '/ ' + r.bf + '%' : ''} ${r.muscle != null ? '/ 筋' + r.muscle + 'kg' : ''} ${r.bmr != null ? '/ ' + r.bmr + 'kcal' : ''}</span>
+                <button class="set-del" data-ib-del="${r.id}" aria-label="削除">✕</button>
+              </div>`).join('')}
+          </div>
+        </details>` : ''}
+      </div>
+    </section>
+
+    <section class="card">
       <h2 class="card-title">AI設定（Gemini 無料API）</h2>
       <div class="form-grid">
         <label class="f-label">APIキー
@@ -90,7 +126,7 @@ function renderSettings(el) {
       </div>
     </section>
 
-    <div class="about">筋メシ v1.0 ・ あなた専用の筋トレ＆食事管理</div>
+    <div class="about">筋メシ v1.4 ・ あなた専用の筋トレ＆食事管理</div>
   `;
 
   const $ = id => el.querySelector(id);
@@ -115,6 +151,35 @@ function renderSettings(el) {
     $('#st-kcal').value = t.kcal; $('#st-p').value = t.p; $('#st-f').value = t.f; $('#st-c').value = t.c;
     saveTargets();
     toast(`目標を計算しました: ${t.kcal}kcal / P${t.p} F${t.f} C${t.c}`);
+  });
+
+  // InBody
+  $('#ib-photo').addEventListener('click', () => {
+    if (!state.settings.apiKey) { toast('先に下のAI設定でAPIキーを設定してください'); return; }
+    App.photoTarget = 'inbody';
+    document.getElementById('photo-input').click();
+  });
+  $('#ib-manual').addEventListener('click', openInbodyManual);
+  $('#st-activity').addEventListener('change', () => { state.settings.activity = $('#st-activity').value; saveState(); });
+  const ibCalc = $('#ib-calc');
+  if (ibCalc) ibCalc.addEventListener('click', () => {
+    const rec = latestInbody();
+    if (!rec) return;
+    const t = calcTargetsFromInbody(rec, state.settings.activity, state.settings.profile.goal);
+    state.settings.targets = { kcal: t.kcal, p: t.p, f: t.f, c: t.c };
+    if (rec.weight) state.settings.profile.weight = rec.weight;
+    saveState();
+    renderSettings(el);
+    toast(`目標を更新: ${t.kcal}kcal / P${t.p} F${t.f} C${t.c}`);
+  });
+  el.querySelectorAll('[data-ib-del]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (await confirmDlg('この測定記録を削除しますか？')) {
+        state.inbody = state.inbody.filter(r => r.id !== btn.dataset.ibDel);
+        saveState();
+        renderSettings(el);
+      }
+    });
   });
 
   // AI設定
@@ -168,4 +233,122 @@ function renderSettings(el) {
       location.reload();
     }
   });
+}
+
+/* ---------- InBody ---------- */
+function inbodyLatestHtml() {
+  const r = latestInbody();
+  if (!r) return '<div class="hint">ジムで測ったInBodyの結果用紙を写真で読み取ると、体重・体脂肪率・骨格筋量・基礎代謝を記録できます。</div>';
+  return `
+    <div class="ib-grid">
+      <div class="ib-cell"><b>${r.weight ?? '–'}</b><span>体重kg</span></div>
+      <div class="ib-cell"><b>${r.bf ?? '–'}</b><span>体脂肪%</span></div>
+      <div class="ib-cell"><b>${r.muscle ?? '–'}</b><span>骨格筋kg</span></div>
+      <div class="ib-cell"><b>${r.bmr ? r.bmr.toLocaleString() : '–'}</b><span>基礎代謝</span></div>
+    </div>
+    <div class="hint" style="text-align:center">最終測定: ${esc(r.date || '?')}</div>`;
+}
+
+function calcTargetsFromInbody(rec, activity, goal) {
+  const w = num(rec.weight) || 65;
+  const lbm = rec.bf != null ? w * (1 - num(rec.bf) / 100) : null;
+  const bmr = num(rec.bmr) || (lbm ? Math.round(370 + 21.6 * lbm) : Math.round(w * 22));
+  const af = { low: 1.35, mid: 1.55, high: 1.75 }[activity] || 1.55;
+  let kcal = Math.round(bmr * af);
+  kcal += goal === 'gain' ? 300 : goal === 'cut' ? -400 : 0;
+  const p = Math.round(lbm ? lbm * 2.3 : w * 2);
+  const f = Math.round(kcal * 0.25 / 9);
+  const c = Math.max(0, Math.round((kcal - p * 4 - f * 9) / 4));
+  return { kcal, p, f, c, bmr };
+}
+
+function inbodyFormHtml(r) {
+  return `
+    <div class="grid2">
+      <label class="f-label">測定日<input type="date" class="input" id="ib-date" value="${esc(r.date || todayStr())}"></label>
+      <label class="f-label">体重(kg)<input type="number" inputmode="decimal" step="0.1" class="input" id="ib-w" value="${r.weight ?? ''}"></label>
+    </div>
+    <div class="grid2">
+      <label class="f-label">体脂肪率(%)<input type="number" inputmode="decimal" step="0.1" class="input" id="ib-bf" value="${r.bf ?? ''}"></label>
+      <label class="f-label">骨格筋量(kg)<input type="number" inputmode="decimal" step="0.1" class="input" id="ib-m" value="${r.muscle ?? ''}"></label>
+    </div>
+    <label class="f-label">基礎代謝量(kcal)<input type="number" inputmode="numeric" class="input" id="ib-bmr" value="${r.bmr ?? ''}"></label>`;
+}
+
+function saveInbodyFromForm(body) {
+  const v = id => { const x = body.querySelector(id).value; return x === '' ? null : Number(x); };
+  const weight = v('#ib-w');
+  if (!weight) { toast('体重を入力してください'); return false; }
+  addInbody({
+    date: body.querySelector('#ib-date').value || todayStr(),
+    weight, bf: v('#ib-bf'), muscle: v('#ib-m'),
+    bmr: v('#ib-bmr') ? Math.round(v('#ib-bmr')) : null,
+  });
+  return true;
+}
+
+function openInbodyManual() {
+  const body = sheet('InBodyを手動入力', `
+    <div class="form-grid">
+      ${inbodyFormHtml({})}
+      <div class="btn-row">
+        <button class="btn ghost" id="ib-cancel">キャンセル</button>
+        <button class="btn primary" id="ib-save">保存する</button>
+      </div>
+    </div>`);
+  body.querySelector('#ib-cancel').addEventListener('click', closeSheet);
+  body.querySelector('#ib-save').addEventListener('click', () => {
+    if (saveInbodyFromForm(body)) { closeSheet(); renderCurrent(); toast('InBodyを記録しました 💪'); }
+  });
+}
+
+async function handleInBodyPhoto(file) {
+  if (!file) return;
+  let apiImg, thumb;
+  try {
+    [apiImg, thumb] = await Promise.all([downscale(file, 1280, 0.85), downscale(file, 520, 0.7)]);
+  } catch (e) { toast('画像を読み込めませんでした'); return; }
+
+  const body = sheet('InBody読み取り', `
+    <img class="analyze-preview" src="${thumb}" alt="InBody結果">
+    <div class="analyze-status" id="ib-status"><span class="spinner"></span> AIが結果用紙を読み取っています…</div>
+    <div id="ib-result"></div>
+  `);
+
+  try {
+    const r = await analyzeInBodyPhoto(apiImg);
+    body.querySelector('#ib-status').style.display = 'none';
+    body.querySelector('#ib-result').innerHTML = `
+      <div class="an-note">読み取り結果を確認してください。間違っていたら直せます。</div>
+      <div class="form-grid">
+        ${inbodyFormHtml(r)}
+        <div class="btn-row">
+          <button class="btn ghost" id="ib-retry">撮り直す</button>
+          <button class="btn primary" id="ib-save">保存する</button>
+        </div>
+      </div>`;
+    body.querySelector('#ib-retry').addEventListener('click', () => {
+      closeSheet();
+      App.photoTarget = 'inbody';
+      document.getElementById('photo-input').click();
+    });
+    body.querySelector('#ib-save').addEventListener('click', () => {
+      if (saveInbodyFromForm(body)) { closeSheet(); renderCurrent(); toast('InBodyを記録しました 💪'); }
+    });
+  } catch (e) {
+    body.querySelector('#ib-status').style.display = 'none';
+    const msg = e.message === 'NO_KEY' ? 'AI設定でAPIキーを設定してください。' : e.message;
+    body.querySelector('#ib-result').innerHTML = `
+      <div class="an-note err">読み取れませんでした：${esc(msg)}</div>
+      <div class="btn-row">
+        <button class="btn ghost" id="ib-manual2">手動で入力</button>
+        <button class="btn primary" id="ib-retry2">もう一度</button>
+      </div>`;
+    body.querySelector('#ib-manual2').addEventListener('click', () => { closeSheet(); openInbodyManual(); });
+    body.querySelector('#ib-retry2').addEventListener('click', () => {
+      closeSheet();
+      App.photoTarget = 'inbody';
+      document.getElementById('photo-input').click();
+    });
+  }
 }
