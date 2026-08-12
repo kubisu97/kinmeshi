@@ -42,9 +42,10 @@ function renderSettings(el) {
       <h2 class="card-title">InBody連携</h2>
       <div class="form-grid">
         <div id="ib-latest">${inbodyLatestHtml()}</div>
-        <div class="btn-row">
-          <button class="btn ghost small" id="ib-photo">📷 用紙/画面を読み取る</button>
+        <div class="btn-row wrap">
+          <button class="btn ghost small" id="ib-photo">📷 読み取り</button>
           <button class="btn ghost small" id="ib-clip">📋 取り込み</button>
+          <button class="btn ghost small" id="ib-csv">📂 CSV</button>
           <button class="btn ghost small" id="ib-manual">手動</button>
         </div>
         <details class="guide">
@@ -58,7 +59,9 @@ function renderSettings(el) {
             <li>アクション「<b>クリップボードにコピー</b>」を追加して完了</li>
             <li><b>使い方</b>: 測定後にショートカットを実行 → 筋メシのこの画面で「📋 取り込み」。ショートカットをホーム画面に置けば1タップです</li>
           </ol>
+          <div class="hint">※ヘルスケアには骨格筋量・基礎代謝の項目が無いため、この方法で取れるのは体重・体脂肪率（＋除脂肪体重）まで。全項目を記録したい月1回はInBodyアプリの画面スクショ→「📷 読み取り」がおすすめ。</div>
         </details>
+        <div class="hint">📂 CSV: 「測定日」と「体重」の列があるCSVなら何でも一括取り込みできます（ジムのLookinBodyからの書き出し、自分の記録表など）。重複する日付は自動でスキップ。</div>
         <div class="grid2">
           <label class="f-label">活動量
             <select class="input" id="st-activity">
@@ -139,7 +142,7 @@ function renderSettings(el) {
       </div>
     </section>
 
-    <div class="about">筋メシ v1.5 ・ あなた専用の筋トレ＆食事管理</div>
+    <div class="about">筋メシ v1.6 ・ あなた専用の筋トレ＆食事管理</div>
   `;
 
   const $ = id => el.querySelector(id);
@@ -174,6 +177,7 @@ function renderSettings(el) {
   });
   $('#ib-manual').addEventListener('click', openInbodyManual);
   $('#ib-clip').addEventListener('click', importInbodyFromClipboard);
+  $('#ib-csv').addEventListener('click', () => document.getElementById('csv-input').click());
   $('#st-activity').addEventListener('change', () => { state.settings.activity = $('#st-activity').value; saveState(); });
   const ibCalc = $('#ib-calc');
   if (ibCalc) ibCalc.addEventListener('click', () => {
@@ -371,9 +375,12 @@ async function handleInBodyPhoto(file) {
 function parseInbodyText(text) {
   const pick = (re) => { const m = text.match(re); return m ? Number(m[1].replace(/,/g, '')) : null; };
   const weight = pick(/体重[^\d]*([\d.]+)/) ?? pick(/weight[^\d]*([\d.]+)/i);
-  const bf = pick(/体脂肪率?[^\d]*([\d.]+)/) ?? pick(/body ?fat[^\d]*([\d.]+)/i);
+  let bf = pick(/体脂肪率?[^\d]*([\d.]+)/) ?? pick(/body ?fat[^\d]*([\d.]+)/i);
+  const lbm = pick(/除脂肪体重[^\d]*([\d.]+)/) ?? pick(/lean ?body ?mass[^\d]*([\d.]+)/i);
   const muscle = pick(/骨格筋量?[^\d]*([\d.]+)/);
   const bmr = pick(/基礎代謝量?[^\d]*([\d,]+)/);
+  // 体脂肪率が無くても除脂肪体重があれば逆算できる
+  if (bf == null && lbm != null && weight) bf = round1((1 - lbm / weight) * 100);
   let date = todayStr();
   const dm = text.match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/);
   if (dm) date = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
@@ -406,5 +413,85 @@ async function importInbodyFromClipboard() {
   body.querySelector('#ib-cancel').addEventListener('click', closeSheet);
   body.querySelector('#ib-save').addEventListener('click', () => {
     if (saveInbodyFromForm(body)) { closeSheet(); renderCurrent(); toast('InBodyを取り込みました 💪'); }
+  });
+}
+
+/* CSVからの一括取り込み（LookinBody書き出し・自作の記録表など） */
+function decodeCsvBuffer(buf) {
+  const tryDec = (enc) => { try { return new TextDecoder(enc).decode(buf); } catch (e) { return null; } };
+  let t = tryDec('utf-8') || '';
+  if (t.includes('�')) {
+    const s = tryDec('shift_jis');
+    if (s && !s.includes('�')) t = s;
+  }
+  return t.replace(/^﻿/, '');
+}
+
+function parseInbodyCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const delim = (lines[0].match(/\t/g) || []).length >= 2 ? '\t' : ',';
+  const split = (l) => l.split(delim).map(c => c.replace(/^"|"$/g, '').trim());
+  const head = split(lines[0]);
+  const findCol = (res) => head.findIndex(h => res.some(re => re.test(h)));
+  const ci = {
+    date: findCol([/測定日|日時|日付|date/i]),
+    weight: findCol([/体重|weight/i]),
+    bf: findCol([/体脂肪率|PBF|percent.*fat|body ?fat/i]),
+    muscle: findCol([/骨格筋|SMM|skeletal/i]),
+    bmr: findCol([/基礎代謝|BMR|basal/i]),
+    lbm: findCol([/除脂肪|LBM|lean/i]),
+  };
+  if (ci.date < 0 || ci.weight < 0) return [];
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = split(lines[i]);
+    const numAt = (idx) => {
+      if (idx < 0 || c[idx] == null || c[idx] === '') return null;
+      const n = Number(String(c[idx]).replace(/[^\d.]/g, ''));
+      return isFinite(n) && n > 0 ? n : null;
+    };
+    const dm = String(c[ci.date] || '').match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/);
+    if (!dm) continue;
+    const date = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
+    const weight = numAt(ci.weight);
+    if (!weight) continue;
+    let bf = numAt(ci.bf);
+    const lbm = numAt(ci.lbm);
+    if (bf == null && lbm != null) bf = round1((1 - lbm / weight) * 100);
+    const bmrV = numAt(ci.bmr);
+    out.push({ date, weight, bf, muscle: numAt(ci.muscle), bmr: bmrV ? Math.round(bmrV) : null });
+  }
+  return out;
+}
+
+async function importInbodyCsvFile(file) {
+  let recs = [];
+  try {
+    recs = parseInbodyCsv(decodeCsvBuffer(await file.arrayBuffer()));
+  } catch (e) { /* noop */ }
+  if (!recs.length) {
+    toast('CSVから測定データを見つけられませんでした（「測定日」と「体重」の列が必要です）');
+    return;
+  }
+  const existing = new Set(state.inbody.map(r => r.date));
+  const fresh = recs.filter(r => !existing.has(r.date));
+  const body = sheet('CSV取り込みの確認', `
+    <div class="an-note">${recs.length}件の測定データが見つかりました（新規 ${fresh.length}件 / 重複スキップ ${recs.length - fresh.length}件）</div>
+    ${fresh.length ? `<div class="an-items">
+      ${fresh.slice(0, 5).map(r => `<div class="an-item"><span>${esc(r.date)}</span><span>${r.weight}kg${r.bf != null ? ' / ' + r.bf + '%' : ''}${r.bmr ? ' / ' + r.bmr + 'kcal' : ''}</span></div>`).join('')}
+      ${fresh.length > 5 ? `<div class="an-item"><span>…ほか ${fresh.length - 5}件</span><span></span></div>` : ''}
+    </div>` : ''}
+    <div class="btn-row">
+      <button class="btn ghost" id="csv-cancel">キャンセル</button>
+      <button class="btn primary" id="csv-ok" ${fresh.length ? '' : 'disabled'}>${fresh.length}件を取り込む</button>
+    </div>`);
+  body.querySelector('#csv-cancel').addEventListener('click', closeSheet);
+  body.querySelector('#csv-ok').addEventListener('click', () => {
+    for (const r of fresh) state.inbody.push({ id: uid(), ...r });
+    saveState();
+    closeSheet();
+    renderCurrent();
+    toast(`${fresh.length}件のInBodyデータを取り込みました 💪`);
   });
 }

@@ -330,6 +330,65 @@
     P('M47 46 L53 46 M50 43 L53 46 L50 49', E, 2.4),
   ];
 
+  /* ペックフライ（マシンで腕を閉じる） */
+  A.pecdeck = [
+    P('M22 42 H42', S, 3.6),
+    HEAD(32, 11), P('M32 16 L32 40', F),
+    P('M32 23 L21 23 L21 10', F),
+    P('M32 23 L43 23 L43 10', F),
+    P('M16 9 V26', E, 4.2), P('M48 9 V26', E, 4.2),
+    P('M23 6 L28 6 M26 4 L28 6 L26 8', E, 2.2),
+    P('M41 6 L36 6 M38 4 L36 6 L38 8', E, 2.2),
+  ];
+  /* リアデルト（マシンで腕を後ろへ開く） */
+  A.reardeck = [
+    P('M22 42 H42', S, 3.6),
+    HEAD(32, 11), P('M32 16 L32 40', F),
+    P('M32 23 L24 23 L24 10', F),
+    P('M32 23 L40 23 L40 10', F),
+    P('M30 9 V26', E, 4.2), P('M34 9 V26', E, 4.2),
+    P('M20 6 L15 6 M17 4 L15 6 L17 8', E, 2.2),
+    P('M44 6 L49 6 M47 4 L49 6 L47 8', E, 2.2),
+  ];
+  /* ローワーバック（上体を後ろへ起こす） */
+  A.backext = [
+    P('M18 40 H32', S, 4), P('M22 40 V54 M28 40 V54', S, 3),
+    HEAD(44, 21), P('M27 38 L41 25', F),
+    P('M27 38 L27 54', F),
+    P('M33 29 L38 35', F),
+    P('M48 30 A 15 15 0 0 1 45 42', E, 2.2),
+    P('M45 42 L47 37 M45 42 L40 41', E, 2.2),
+  ];
+  /* マルチヒップ/グルート（脚を後ろへ振る） */
+  A.multihip = [
+    P('M14 12 V54', S, 3.6),
+    HEAD(28, 12), P('M28 17 L28 36', F),
+    P('M28 21 L16 25', F),
+    P('M28 36 L28 54', F),
+    P('M28 36 L42 44', F),
+    DOT(44, 45, 3.2),
+    P('M36 53 A 17 17 0 0 0 47 39', E, 2.2),
+    P('M47 39 L43 40 M47 39 L47 44', E, 2.2),
+  ];
+  /* クロストレーナー */
+  A.elliptical = [
+    P('M12 54 H52', G, 2.4),
+    RING(46, 47, 6, S, 3),
+    P('M42 13 V30', E, 3),
+    HEAD(26, 11), P('M27 16 L29 34', F),
+    P('M28 21 L41 16', F),
+    P('M29 34 L24 45 M29 34 L36 43', F),
+    P('M20 48 L30 47', E, 4), P('M32 46 L42 45', E, 4),
+  ];
+  /* ステップマシン */
+  A.stepper = [
+    P('M14 54 H26 V46 H38 V38 H50 V30 H56', S, 3),
+    HEAD(28, 9), P('M28 14 L30 31', F),
+    P('M29 19 L36 25 M29 19 L22 26', F),
+    P('M30 31 L38 36 L39 44', F),
+    P('M30 31 L24 41 L25 52', F),
+  ];
+
   /* ===== 汎用（カスタム種目用） ===== */
   A.generic = [
     P('M14 32 H50', E, 3.4),
@@ -348,10 +407,10 @@
     px40: 'curl', px41: 'curl', px42: 'curl', px43: 'triext', px44: 'pressdown', px45: 'bench',
     px50: 'plank', px51: 'crunch', px52: 'legraise', px53: 'abroller', px54: 'sideplank',
     px60: 'run', px61: 'walk', px62: 'bike', px63: 'swim', px64: 'rope',
-    px70: 'fly', px71: 'rearraise', px72: 'curl', px73: 'triext', px74: 'crunch',
-    px75: 'torso', px76: 'crunch', px77: 'latpull', px78: 'seatedrow', px79: 'generic',
-    px80: 'generic', px81: 'abadd', px82: 'abadd', px83: 'hipthrust', px84: 'calf',
-    px85: 'squat', px87: 'run', px88: 'bike', px89: 'walk',
+    px70: 'pecdeck', px71: 'reardeck', px72: 'curl', px73: 'pressdown', px74: 'crunch',
+    px75: 'torso', px76: 'crunch', px77: 'latpull', px78: 'seatedrow', px79: 'backext',
+    px80: 'multihip', px81: 'abadd', px82: 'abadd', px83: 'multihip', px84: 'calf',
+    px85: 'squat', px87: 'elliptical', px88: 'bike', px89: 'stepper',
   };
 
   window.exArt = function (exId, cls = '') {

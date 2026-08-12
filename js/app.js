@@ -49,6 +49,13 @@ function init() {
     else handlePhotoFile(f);
   });
 
+  // InBody CSV読み込み
+  document.getElementById('csv-input').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (f) importInbodyCsvFile(f);
+  });
+
   // バックアップ読み込み
   document.getElementById('import-input').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0];
