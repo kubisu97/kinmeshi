@@ -142,7 +142,7 @@ function renderSettings(el) {
       </div>
     </section>
 
-    <div class="about">筋メシ v1.6 ・ あなた専用の筋トレ＆食事管理</div>
+    <div class="about">筋メシ v1.7 ・ あなた専用の筋トレ＆食事管理</div>
   `;
 
   const $ = id => el.querySelector(id);
@@ -441,6 +441,12 @@ function parseInbodyCsv(text) {
     muscle: findCol([/^骨格筋量|SMM|skeletal muscle mass/i]),
     bmr: findCol([/基礎代謝|BMR|basal/i]),
     lbm: findCol([/除脂肪|LBM|lean body/i]),
+    armR: findCol([/右腕筋肉量/]),
+    armL: findCol([/左腕筋肉量/]),
+    trunk: findCol([/体幹筋肉量/]),
+    legR: findCol([/右脚筋肉量/]),
+    legL: findCol([/左脚筋肉量/]),
+    score: findCol([/InBody点数|InBody ?Score/i]),
   };
   if (ci.date < 0 || ci.weight < 0) return [];
   const parseDate = (s) => {
@@ -467,7 +473,15 @@ function parseInbodyCsv(text) {
     const lbm = numAt(ci.lbm);
     if (bf == null && lbm != null) bf = round1((1 - lbm / weight) * 100);
     const bmrV = numAt(ci.bmr);
-    out.push({ date, weight, bf, muscle: numAt(ci.muscle), bmr: bmrV ? Math.round(bmrV) : null });
+    const seg = {
+      armR: numAt(ci.armR), armL: numAt(ci.armL), trunk: numAt(ci.trunk),
+      legR: numAt(ci.legR), legL: numAt(ci.legL),
+    };
+    const hasSeg = Object.values(seg).some(v => v != null);
+    out.push({
+      date, weight, bf, muscle: numAt(ci.muscle), bmr: bmrV ? Math.round(bmrV) : null,
+      seg: hasSeg ? seg : null, score: numAt(ci.score),
+    });
   }
   return out;
 }
@@ -481,10 +495,21 @@ async function importInbodyCsvFile(file) {
     toast('CSVから測定データを見つけられませんでした（「測定日」と「体重」の列が必要です）');
     return;
   }
+  // 重複日付は不足項目だけ補完（部位別データ等を後から足せる）
+  let merged = 0;
+  for (const r of recs) {
+    const ex = state.inbody.find(x => x.date === r.date);
+    if (!ex) continue;
+    let touched = false;
+    for (const k of ['bf', 'muscle', 'bmr', 'seg', 'score']) {
+      if ((ex[k] == null || ex[k] === undefined) && r[k] != null) { ex[k] = r[k]; touched = true; }
+    }
+    if (touched) merged++;
+  }
   const existing = new Set(state.inbody.map(r => r.date));
   const fresh = recs.filter(r => !existing.has(r.date));
   const body = sheet('CSV取り込みの確認', `
-    <div class="an-note">${recs.length}件の測定データが見つかりました（新規 ${fresh.length}件 / 重複スキップ ${recs.length - fresh.length}件）</div>
+    <div class="an-note">${recs.length}件の測定データが見つかりました（新規 ${fresh.length}件 / 重複 ${recs.length - fresh.length}件${merged ? `・うち${merged}件は不足項目を補完` : ''}）</div>
     ${fresh.length ? `<div class="an-items">
       ${fresh.slice(0, 5).map(r => `<div class="an-item"><span>${esc(r.date)}</span><span>${r.weight}kg${r.bf != null ? ' / ' + r.bf + '%' : ''}${r.bmr ? ' / ' + r.bmr + 'kcal' : ''}</span></div>`).join('')}
       ${fresh.length > 5 ? `<div class="an-item"><span>…ほか ${fresh.length - 5}件</span><span></span></div>` : ''}
@@ -496,9 +521,10 @@ async function importInbodyCsvFile(file) {
   body.querySelector('#csv-cancel').addEventListener('click', closeSheet);
   body.querySelector('#csv-ok').addEventListener('click', () => {
     for (const r of fresh) state.inbody.push({ id: uid(), ...r });
-    saveState();
+    saveState(); // 補完分も保存
     closeSheet();
     renderCurrent();
     toast(`${fresh.length}件のInBodyデータを取り込みました 💪`);
   });
+  if (merged) saveState();
 }

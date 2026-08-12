@@ -160,7 +160,9 @@ const INBODY_PROMPT = `この画像は体成分分析（InBodyなど）の結果
   "weight": 体重kgの数値またはnull,
   "bf": 体脂肪率%の数値またはnull,
   "muscle": 骨格筋量kgの数値またはnull,
-  "bmr": 基礎代謝量kcalの数値またはnull
+  "bmr": 基礎代謝量kcalの数値またはnull,
+  "seg": {"armR": 右腕筋肉量kg, "armL": 左腕筋肉量kg, "trunk": 体幹筋肉量kg, "legR": 右脚筋肉量kg, "legL": 左脚筋肉量kg}（部位別筋肉量が読み取れなければnull）,
+  "score": InBody点数の数値またはnull
 }
 体成分の結果用紙でない場合は {"weight": null} とだけ回答してください。`;
 
@@ -173,12 +175,21 @@ async function analyzeInBodyPhoto(dataUrl) {
   ], true);
   const obj = parseJsonLoose(text);
   if (!obj || obj.weight == null) throw new Error('InBodyの結果用紙を認識できませんでした。用紙全体が明るく写るように撮ってみてください。');
+  const seg = obj.seg && typeof obj.seg === 'object' ? {
+    armR: obj.seg.armR != null ? round1(num(obj.seg.armR)) : null,
+    armL: obj.seg.armL != null ? round1(num(obj.seg.armL)) : null,
+    trunk: obj.seg.trunk != null ? round1(num(obj.seg.trunk)) : null,
+    legR: obj.seg.legR != null ? round1(num(obj.seg.legR)) : null,
+    legL: obj.seg.legL != null ? round1(num(obj.seg.legL)) : null,
+  } : null;
   return {
     date: obj.date || todayStr(),
     weight: num(obj.weight) || null,
     bf: obj.bf != null ? round1(num(obj.bf)) : null,
     muscle: obj.muscle != null ? round1(num(obj.muscle)) : null,
     bmr: obj.bmr != null ? Math.round(num(obj.bmr)) : null,
+    seg: seg && Object.values(seg).some(v => v != null) ? seg : null,
+    score: obj.score != null ? Math.round(num(obj.score)) : null,
   };
 }
 
@@ -193,6 +204,16 @@ ${summary}
 ・改善点や次にやるべきことを2〜3個、具体的に（種目名・重量・食品名レベルで）
 ・全体で250文字以内、箇条書き中心で簡潔に`;
   return await geminiGenerate([{ text: prompt }], false);
+}
+
+/* ---------- AIトレーニングメニュー生成 ---------- */
+async function aiWorkoutMenu(prompt) {
+  const text = await geminiGenerate([{ text: prompt }], true);
+  const obj = parseJsonLoose(text);
+  if (!obj || !Array.isArray(obj.items) || !obj.items.length) {
+    throw new Error('メニューを作れませんでした。条件を変えてもう一度試してください。');
+  }
+  return obj;
 }
 
 /* ---------- モデル一覧（接続テスト） ---------- */
