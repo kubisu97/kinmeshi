@@ -331,3 +331,37 @@ select.input { appearance: none; }
 
 /* コーチカード */
 .coach-card .sug-body { margin-bottom: 10px; }
+
+/* ---------- 記録カレンダー ---------- */
+.cal-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 6px; }
+.cal-stats { text-align: center; font-size: 12px; color: var(--ink2); margin: 2px 0 10px; }
+.cal-stats b { color: var(--ink); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-dow { text-align: center; font-size: 10px; color: var(--muted); font-weight: 700; padding: 2px 0; }
+.cal-dow.sun { color: #e66767; }
+.cal-dow.sat { color: #6da7ec; }
+.cal-cell {
+  aspect-ratio: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  cursor: pointer; padding: 2px; color: var(--ink2); font-family: inherit; appearance: none;
+}
+.cal-cell .dnum { font-size: 12px; font-weight: 700; }
+.cal-cell.other { opacity: .35; }
+.cal-cell.today .dnum { color: var(--c-p); }
+.cal-cell.sel { border-color: var(--c-p); background: rgba(57,135,229,.12); }
+.cal-dots { display: flex; gap: 3px; height: 6px; }
+.cd { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.cd.w { background: var(--c-p); }
+.cd.m { background: var(--c-f); }
+.cal-legend { display: flex; gap: 16px; justify-content: center; align-items: center; margin: 10px 0; font-size: 11px; color: var(--muted); }
+.cal-legend span { display: flex; align-items: center; gap: 5px; }
+.cal-sec { margin-top: 10px; }
+.cal-sec-head { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.cal-sec-sub { font-weight: 600; color: var(--ink2); font-size: 12px; }
+.cal-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--ink2); padding: 3px 0; border-bottom: 1px solid var(--grid); }
+.cal-line:last-of-type { border-bottom: none; }
+.cal-line-r { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; flex: none; max-width: 55%; }
+.cal-sec .btn { margin-top: 8px; }
+
+/* タブ5つ用に少し詰める */
+.tabbar button { padding: 4px 8px; }

@@ -22,6 +22,7 @@
       <button data-tab="home" class="active"><span class="tab-ic" id="tab-ic-home"></span>ホーム</button>
       <button data-tab="workout"><span class="tab-ic" id="tab-ic-workout"></span>筋トレ</button>
       <button data-tab="meals"><span class="tab-ic" id="tab-ic-meals"></span>食事</button>
+      <button data-tab="calendar"><span class="tab-ic" id="tab-ic-calendar"></span>記録</button>
       <button data-tab="settings"><span class="tab-ic" id="tab-ic-settings"></span>設定</button>
     </nav>
   </div>
@@ -42,12 +43,13 @@
   <script src="./js/scr-home.js"></script>
   <script src="./js/scr-workout.js"></script>
   <script src="./js/scr-meals.js"></script>
+  <script src="./js/scr-calendar.js"></script>
   <script src="./js/scr-settings.js"></script>
   <script src="./js/app.js"></script>
   <script>
     // タブアイコンを描画
     document.addEventListener('DOMContentLoaded', () => {
-      for (const k of ['home', 'workout', 'meals', 'settings']) {
+      for (const k of ['home', 'workout', 'meals', 'calendar', 'settings']) {
         const el = document.getElementById('tab-ic-' + k);
         if (el) el.innerHTML = ICONS[k];
       }
