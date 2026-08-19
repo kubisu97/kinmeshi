@@ -462,6 +462,33 @@ function buildMenuPrompt(prefs, prevMenu, tweak) {
     const d = last[k];
     L.push(`${MUSCLES[k].label}: ${d ? `${daysBetween(d, todayStr())}日前` : '記録なし'}`);
   }
+  // 直近のセッション内容（昨日何をやったかを具体的に見せる）
+  const sessDates = Object.keys(state.workouts)
+    .filter(d => d <= todayStr() && (state.workouts[d].entries || []).some(e => e.sets.some(s => s.done)))
+    .sort().reverse().slice(0, 3);
+  if (sessDates.length) {
+    L.push('', '## 直近のセッション内容（この続きとして自然な構成に）');
+    for (const d of sessDates) {
+      const names = (state.workouts[d].entries || [])
+        .filter(e => e.sets.some(s => s.done))
+        .map(e => { const ex = exById(e.exId); return ex ? ex.name : null; })
+        .filter(Boolean);
+      if (names.length) L.push(`${daysBetween(d, todayStr())}日前（${fmtDateJa(d)}）: ${names.join('、')}`);
+    }
+  }
+  // 直近7日の部位バランス（完了セット数）
+  const bal = {};
+  for (let i = 0; i < 7; i++) {
+    const wd = state.workouts[addDays(todayStr(), -i)];
+    if (!wd) continue;
+    for (const e of (wd.entries || [])) {
+      const ex = exById(e.exId);
+      if (!ex) continue;
+      bal[ex.muscle] = (bal[ex.muscle] || 0) + e.sets.filter(s => s.done).length;
+    }
+  }
+  L.push('', '## 直近7日の部位別セット数（偏りの参考）');
+  L.push(Object.keys(MUSCLES).filter(k => k !== 'cardio').map(k => `${MUSCLES[k].label}${bal[k] || 0}`).join(' / '));
   L.push('', '## 直近の種目実績（重量の参考）');
   const dates = Object.keys(state.workouts).sort().reverse().slice(0, 8);
   const seen = new Set(); const recs = [];
@@ -491,6 +518,7 @@ function buildMenuPrompt(prefs, prevMenu, tweak) {
   L.push('', `ルール:
 - 種目数は時間に収める（筋トレ1種目3セット≒10分、有酸素はr=分をそのまま計上）
 - 数日空いている部位を優先。ただし希望部位があれば最優先
+- 直近のセッションと同じ部位・種目の連続は避ける（同部位は中2〜3日で回復を確保）。偏りが見えたら弱い部位を組み込み、rationaleで直近の内容に触れること
 - 重量(w)は実績を基準に漸進的に。自重種目はwを省略。有酸素はrに分
 - 必ず次のJSONだけで回答:
 {"title":"メニューの短い名前","rationale":"この構成にした理由（120字以内。InBodyや履歴に触れる）","items":[{"exId":"px01","sets":[{"w":60,"r":10},{"w":60,"r":10},{"w":60,"r":8}]}],"advice":"一言アドバイス（60字以内）"}`);
