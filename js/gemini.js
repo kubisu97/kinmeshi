@@ -194,16 +194,43 @@ async function analyzeInBodyPhoto(dataUrl) {
 }
 
 /* ---------- AIコーチ（テキスト） ---------- */
-async function aiCoachAdvice(summary) {
-  const prompt = `あなたは優秀なパーソナルトレーナー兼管理栄養士です。以下は私のトレーニングと食事の記録です。
+function coachPromptText(summary) {
+  return `あなたは優秀なパーソナルトレーナー兼管理栄養士です。以下は私のトレーニングと食事の記録です。
 
 ${summary}
 
 この記録をもとに、次のトレーニングと食事について具体的なアドバイスを日本語でください。
 ・良い点をひとつ褒める
 ・改善点や次にやるべきことを2〜3個、具体的に（種目名・重量・食品名レベルで）
-・全体で250文字以内、箇条書き中心で簡潔に`;
-  return await geminiGenerate([{ text: prompt }], false);
+・全体で250文字以内、箇条書き中心で簡潔に
+
+この後、私から追加の質問をすることがあります。質問には理由・根拠を添えて、日本語で簡潔（目安200文字以内）に答えてください。`;
+}
+async function aiCoachAdvice(summary) {
+  return await geminiGenerate([{ text: coachPromptText(summary) }], false);
+}
+
+/* マルチターン会話（アドバイスへの追加質問） */
+async function geminiChat(history) {
+  if (!geminiKey()) throw new Error('NO_KEY');
+  const body = {
+    contents: history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+    generationConfig: { temperature: 0.4 },
+  };
+  const data = await geminiFetch(
+    `/models/${encodeURIComponent(geminiModel())}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
+      body: JSON.stringify(body),
+    }
+  );
+  const cand = data && data.candidates && data.candidates[0];
+  const text = cand && cand.content && cand.content.parts
+    ? cand.content.parts.map(p => p.text || '').join('')
+    : '';
+  if (!text) throw new Error('AIから回答が得られませんでした。もう一度試してください。');
+  return text;
 }
 
 /* ---------- AIトレーニングメニュー生成 ---------- */

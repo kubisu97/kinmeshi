@@ -259,6 +259,19 @@
     P('M34 50 L47 33', F),                                        // 上げた脚
     P('M22 50 L30 50', F, 3),
   ];
+  A.dblcrunch = [
+    FLOOR(54), HEAD(19, 36),
+    P('M23 39 L34 50', F),                                        // 起こした上体
+    P('M34 50 L40 37 L48 41', F),                                 // 引きつけた膝（足は浮く）
+    P('M25 41 L34 38', F),                                        // 膝へ伸ばす腕
+  ];
+  A.rtwist = [
+    FLOOR(54), HEAD(21, 29),
+    P('M24 32 L33 48', F),                                        // 後ろに倒した上体
+    P('M33 48 L44 40 L50 46', F),                                 // 浮かせた脚
+    P('M26 35 L40 31', F),                                        // 前へ伸ばす腕
+    RING(43, 30, 3.5), DOT(43, 30, 1.4, E),                       // ひねって持つボール
+  ];
   A.abroller = [
     FLOOR(54), HEAD(45, 33),
     P('M25 45 L41 36', F),                                        // 伸ばした体
@@ -406,6 +419,7 @@
     px30: 'shpress', px31: 'sideraise', px32: 'rearraise', px33: 'frontraise', px34: 'upright',
     px40: 'curl', px41: 'curl', px42: 'curl', px43: 'triext', px44: 'pressdown', px45: 'bench',
     px50: 'plank', px51: 'crunch', px52: 'legraise', px53: 'abroller', px54: 'sideplank',
+    px90: 'dblcrunch', px91: 'rtwist',
     px60: 'run', px61: 'walk', px62: 'bike', px63: 'swim', px64: 'rope',
     px70: 'pecdeck', px71: 'reardeck', px72: 'curl', px73: 'pressdown', px74: 'crunch',
     px75: 'torso', px76: 'crunch', px77: 'latpull', px78: 'seatedrow', px79: 'backext',

@@ -1,6 +1,55 @@
 /* 筋メシ - 筋トレ画面 */
 'use strict';
 
+/* AIコーチとの会話（アプリを開いている間だけ保持） */
+const coachChat = { history: [], busy: false };
+
+function openCoachChat() {
+  const body = sheet('💬 AIコーチに質問', `
+    <div id="chat-log" class="chat-log"></div>
+    <div class="chat-input-row">
+      <input type="text" class="input" id="chat-in" placeholder="例: なんでその重量なの？" autocomplete="off">
+      <button class="btn primary" id="chat-send">送信</button>
+    </div>
+    <div class="an-note">アドバイスの根拠、別の種目への置き換え、食事の代替案など、納得いくまで聞いてください。</div>
+  `);
+  const log = body.querySelector('#chat-log');
+  const inp = body.querySelector('#chat-in');
+  const sendBtn = body.querySelector('#chat-send');
+  const renderLog = () => {
+    // 最初の要素（記録データ入りの長いプロンプト）は隠して、アドバイス以降を表示
+    log.innerHTML = coachChat.history.slice(1).map(m =>
+      `<div class="chat-msg ${m.role === 'model' ? 'ai' : 'user'}">${esc(m.text)}</div>`
+    ).join('') + (coachChat.busy ? '<div class="chat-msg ai typing">考え中…</div>' : '');
+    log.scrollTop = log.scrollHeight;
+  };
+  renderLog();
+  const send = async () => {
+    const q = inp.value.trim();
+    if (!q || coachChat.busy) return;
+    inp.value = '';
+    coachChat.history.push({ role: 'user', text: q });
+    coachChat.busy = true;
+    sendBtn.disabled = true;
+    renderLog();
+    try {
+      const a = await geminiChat(coachChat.history);
+      coachChat.history.push({ role: 'model', text: a.trim() });
+    } catch (e) {
+      // 失敗したら質問を入力欄に戻して再送できるように
+      coachChat.history.pop();
+      inp.value = q;
+      toast(e.message === 'NO_KEY' ? '設定画面でAPIキーを設定してください' : e.message, 3000);
+    }
+    coachChat.busy = false;
+    sendBtn.disabled = false;
+    renderLog();
+  };
+  sendBtn.addEventListener('click', send);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  inp.focus();
+}
+
 function ensureWorkout(date) {
   if (!state.workouts[date]) state.workouts[date] = { entries: [], memo: '' };
   return state.workouts[date];
@@ -119,7 +168,10 @@ function renderWorkout(el) {
     <section class="card coach-card">
       <h2 class="card-title">🤖 AIコーチ</h2>
       <div class="sug-body" id="coach-out">最近の記録をもとに、次のトレーニングと食事のアドバイスをもらえます。</div>
-      <button class="btn ghost small" id="coach-btn">アドバイスをもらう</button>
+      <div class="btn-row">
+        <button class="btn ghost small" id="coach-btn">アドバイスをもらう</button>
+        <button class="btn ghost small" id="coach-chat-btn" style="display:none">💬 続けて質問する</button>
+      </div>
     </section>
   `;
 
@@ -139,6 +191,17 @@ function renderWorkout(el) {
       const entry = ensureWorkout(date).entries[+ei];
       if (!entry) return;
       entry.sets[+si][k] = inp.value === '' ? null : Number(inp.value);
+      // 値を入れたら、下のまだ空のセットにも同じ値を自動コピー
+      const v = entry.sets[+si][k];
+      if (v != null) {
+        for (let j = +si + 1; j < entry.sets.length; j++) {
+          const t = entry.sets[j];
+          if (t.done || t[k] != null) continue;
+          t[k] = v;
+          const sib = el.querySelector(`.set-in[data-ei="${ei}"][data-si="${j}"][data-k="${k}"]`);
+          if (sib) sib.value = v;
+        }
+      }
       saveState();
       // 有酸素はペース表示をその場で更新
       const ex = exById(entry.exId);
@@ -161,7 +224,7 @@ function renderWorkout(el) {
       }
       s.done = !s.done;
       saveState();
-      if (s.done) startRestTimer(); // ✓でレストタイマー開始
+      if (s.done) startRestTimer(true); // ✓でレストタイマー開始（ドデカ表示）
       renderWorkout(el);
     });
   });
@@ -210,6 +273,14 @@ function renderWorkout(el) {
   });
 
   // AIコーチ
+  const chatBtn = el.querySelector('#coach-chat-btn');
+  // 直前のアドバイスがあれば復元（タブ切替や日付移動で消えないように）
+  if (coachChat.history.length >= 2) {
+    el.querySelector('#coach-out').textContent = coachChat.history.filter(m => m.role === 'model').slice(-1)[0].text;
+    el.querySelector('#coach-btn').textContent = 'もう一度きく';
+    chatBtn.style.display = '';
+  }
+  chatBtn.addEventListener('click', openCoachChat);
   el.querySelector('#coach-btn').addEventListener('click', async () => {
     const out = el.querySelector('#coach-out');
     if (!state.settings.apiKey) {
@@ -220,8 +291,15 @@ function renderWorkout(el) {
     btn.disabled = true; btn.textContent = '考え中…';
     out.textContent = '記録を分析しています…';
     try {
-      const advice = await aiCoachAdvice(buildCoachSummary());
+      const summary = buildCoachSummary();
+      const advice = await aiCoachAdvice(summary);
       out.textContent = advice.trim();
+      // 会話の土台をセット（続けて質問できるように）
+      coachChat.history = [
+        { role: 'user', text: coachPromptText(summary) },
+        { role: 'model', text: advice.trim() },
+      ];
+      chatBtn.style.display = '';
     } catch (e) {
       out.textContent = e.message === 'NO_KEY' ? '設定画面でAPIキーを設定してください。' : `エラー: ${e.message}`;
     }
@@ -572,7 +650,7 @@ function restBeep() {
     }
   } catch (e) { /* noop */ }
 }
-function startRestTimer() {
+function startRestTimer(showBig) {
   try { _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (_audioCtx.state === 'suspended') _audioCtx.resume(); } catch (e) { /* noop */ }
   const el = document.getElementById('rest-timer');
   if (!el) return;
@@ -580,6 +658,10 @@ function startRestTimer() {
   restTimer.end = Date.now() + sec * 1000;
   el.style.display = 'flex';
   el.querySelector('#rt-sec').value = String(sec);
+  if (showBig) {
+    const big = document.getElementById('rt-big');
+    if (big) big.style.display = 'flex';
+  }
   clearInterval(restTimer.iv);
   restTimer.iv = setInterval(tickRestTimer, 250);
   tickRestTimer();
