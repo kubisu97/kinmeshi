@@ -37,6 +37,8 @@ function renderMeals(el) {
       <button class="btn quick" id="m-manual">${ICONS.pen}<span>手動で記録</span></button>
     </div>
 
+    ${recentMealChipsHtml()}
+
     ${meals.length ? mealsHtml : '<div class="empty-note">まだ記録がありません。写真を撮ってみましょう 📷</div>'}
 
     ${sugs.length ? `<h2 class="section-title">提案</h2>${suggestionCardsHtml(sugs)}` : ''}
@@ -45,6 +47,7 @@ function renderMeals(el) {
   wireDateNav(el, 'md', () => App.mDate, v => { App.mDate = v; renderMeals(el); });
   el.querySelector('#m-photo').addEventListener('click', openMealPhoto);
   el.querySelector('#m-manual').addEventListener('click', () => openManualMeal());
+  wireRecentMeals(el, false);
   el.querySelectorAll('.meal-card').forEach(c => {
     c.addEventListener('click', () => openMealDetail(+c.dataset.mi));
   });
@@ -169,6 +172,7 @@ function openManualMeal() {
   const hasKey = !!state.settings.apiKey;
   const body = sheet('食事を記録', `
     ${mealFavChipsHtml()}
+    ${recentMealChipsHtml()}
     ${hasKey ? `
     <div class="ai-text-box">
       <div class="qf-label">🤖 食べたものを書くだけでAIが計算</div>
@@ -198,6 +202,7 @@ function openManualMeal() {
   `);
   const get = id => body.querySelector(id);
   wireMealFavs(body);
+  wireRecentMeals(body, true);
 
   // AIテキスト解析
   const aiBtn = get('#mm-ai-btn');
@@ -367,6 +372,56 @@ function wireMealFavs(body) {
       closeSheet();
       renderCurrent();
       toast(`⭐「${fav.name}」を記録しました`);
+    });
+  });
+}
+
+/* ---------- 最近の食事（作り置き向け・直近2週間から再記録） ---------- */
+let _recentMeals = [];
+function recentMealChipsHtml() {
+  const favNames = new Set(state.mealFavs.map(f => f.name));
+  const seen = new Set();
+  const recents = [];
+  const dates = Object.keys(state.meals)
+    .filter(d => d <= todayStr() && daysBetween(d, todayStr()) <= 14)
+    .sort().reverse();
+  for (const d of dates) {
+    const arr = state.meals[d] || [];
+    for (let i = arr.length - 1; i >= 0 && recents.length < 8; i--) {
+      const m = arr[i];
+      if (!m.name || seen.has(m.name) || favNames.has(m.name)) continue;
+      seen.add(m.name);
+      recents.push(m);
+    }
+    if (recents.length >= 8) break;
+  }
+  _recentMeals = recents;
+  if (!recents.length) return '';
+  return `
+    <div class="qf-label">🕐 最近の食事（2週間・タップで再記録）</div>
+    <div class="qf-grid" id="recent-grid">
+      ${recents.map((m, i) => `
+        <button class="qf-chip" data-recent="${i}">
+          ${esc(m.name)}<small>${Math.round(num(m.kcal))}kcal ・ P${Math.round(num(m.p))}</small>
+        </button>`).join('')}
+    </div>`;
+}
+
+function wireRecentMeals(root, inSheet) {
+  root.querySelectorAll('[data-recent]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const m = _recentMeals[+chip.dataset.recent];
+      if (!m) return;
+      if (!state.meals[App.mDate]) state.meals[App.mDate] = [];
+      state.meals[App.mDate].push({
+        id: uid(), time: nowTimeStr(), name: m.name,
+        kcal: num(m.kcal), p: num(m.p), f: num(m.f), c: num(m.c),
+        photo: null, src: 'recent', items: m.items || [],
+      });
+      saveState();
+      if (inSheet) closeSheet();
+      renderCurrent();
+      toast(`🕐「${m.name}」を記録しました`);
     });
   });
 }
