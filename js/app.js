@@ -26,6 +26,7 @@ function renderCurrent() {
   else if (App.tab === 'workout') renderWorkout(el);
   else if (App.tab === 'meals') renderMeals(el);
   else if (App.tab === 'calendar') renderCalendar(el);
+  else if (App.tab === 'advisor') renderAdvisor(el);
   else renderSettings(el);
 }
 

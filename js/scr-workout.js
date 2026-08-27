@@ -662,33 +662,60 @@ function openAiMenu(date, screenEl) {
 /* ---------- レストタイマー ---------- */
 const restTimer = { end: 0, iv: null };
 let _audioCtx = null;
+let _rtKeep = null; // 無音キープアライブ（iOSがAudioContextを止めるのを防ぐ）
+function _beepNow() {
+  const t0 = _audioCtx.currentTime;
+  for (let i = 0; i < 3; i++) {
+    const o = _audioCtx.createOscillator();
+    const g = _audioCtx.createGain();
+    o.connect(g); g.connect(_audioCtx.destination);
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.001, t0 + i * 0.25);
+    g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.25 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + i * 0.25 + 0.2);
+    o.start(t0 + i * 0.25); o.stop(t0 + i * 0.25 + 0.22);
+  }
+}
 function restBeep() {
   try {
     _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const t0 = _audioCtx.currentTime;
-    for (let i = 0; i < 3; i++) {
-      const o = _audioCtx.createOscillator();
-      const g = _audioCtx.createGain();
-      o.connect(g); g.connect(_audioCtx.destination);
-      o.frequency.value = 880;
-      g.gain.setValueAtTime(0.001, t0 + i * 0.25);
-      g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.25 + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, t0 + i * 0.25 + 0.2);
-      o.start(t0 + i * 0.25); o.stop(t0 + i * 0.25 + 0.22);
+    // 待機中にiOSがコンテキストを止めていたら、鳴らす直前に起こす
+    if (_audioCtx.state !== 'running') {
+      _audioCtx.resume().then(() => { try { _beepNow(); } catch (e) { /* noop */ } }).catch(() => {});
+    } else {
+      _beepNow();
     }
   } catch (e) { /* noop */ }
 }
+function startKeepAlive() {
+  try {
+    if (_rtKeep || !_audioCtx) return;
+    const o = _audioCtx.createOscillator();
+    const g = _audioCtx.createGain();
+    g.gain.value = 0.0001; // 実質無音。音を流し続けることでiOSの自動サスペンドを防ぐ
+    o.connect(g); g.connect(_audioCtx.destination);
+    o.frequency.value = 40;
+    o.start();
+    _rtKeep = o;
+  } catch (e) { _rtKeep = null; }
+}
+function stopKeepAlive() {
+  if (_rtKeep) { try { _rtKeep.stop(); } catch (e) { /* noop */ } _rtKeep = null; }
+}
 function startRestTimer(showBig) {
   try { _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (_audioCtx.state === 'suspended') _audioCtx.resume(); } catch (e) { /* noop */ }
+  startKeepAlive();
   const el = document.getElementById('rest-timer');
   if (!el) return;
   const sec = Math.max(15, num(state.settings.restSec) || 90);
   restTimer.end = Date.now() + sec * 1000;
   el.style.display = 'flex';
   el.querySelector('#rt-sec').value = String(sec);
-  if (showBig) {
-    const big = document.getElementById('rt-big');
-    if (big) big.style.display = 'flex';
+  const big = document.getElementById('rt-big');
+  if (big) {
+    big.classList.remove('rtb-over');
+    big.querySelector('.rtb-label').textContent = '☕ 休憩';
+    if (showBig) big.style.display = 'flex';
   }
   clearInterval(restTimer.iv);
   restTimer.iv = setInterval(tickRestTimer, 250);
@@ -697,10 +724,15 @@ function startRestTimer(showBig) {
 function stopRestTimer() {
   clearInterval(restTimer.iv);
   restTimer.iv = null;
+  stopKeepAlive();
   const el = document.getElementById('rest-timer');
   if (el) el.style.display = 'none';
   const big = document.getElementById('rt-big');
-  if (big) big.style.display = 'none';
+  if (big) {
+    big.style.display = 'none';
+    big.classList.remove('rtb-over');
+    big.querySelector('.rtb-label').textContent = '☕ 休憩';
+  }
 }
 function tickRestTimer() {
   const el = document.getElementById('rest-timer');
@@ -709,17 +741,34 @@ function tickRestTimer() {
   const txt = `${Math.floor(remain / 60)}:${String(remain % 60).padStart(2, '0')}`;
   el.querySelector('.rt-time').textContent = txt;
   const big = document.getElementById('rt-big');
-  if (big && big.style.display !== 'none') big.querySelector('.rtb-time').textContent = txt;
+  const bigShown = big && big.style.display !== 'none';
+  if (bigShown) big.querySelector('.rtb-time').textContent = txt;
   if (remain <= 0) {
-    stopRestTimer();
-    restBeep();
+    restBeep(); // 先に鳴らす（キープアライブでコンテキストは起きている）
     toast('☕ 休憩おわり！次のセット🔥');
+    if (bigShown) {
+      // 消音モードでも分かるように、ドデカ画面で2.5秒「おわり」演出してから閉じる
+      clearInterval(restTimer.iv);
+      restTimer.iv = null;
+      big.classList.add('rtb-over');
+      big.querySelector('.rtb-label').textContent = '🔥 休憩おわり！';
+      big.querySelector('.rtb-time').textContent = '0:00';
+      if (el) el.style.display = 'none';
+      setTimeout(() => {
+        if (!restTimer.iv) stopRestTimer(); // 新しいタイマーが始まっていたら閉じない
+        else { big.classList.remove('rtb-over'); }
+      }, 2500);
+    } else {
+      stopRestTimer();
+    }
   }
 }
 function initRestTimer() {
   const el = document.getElementById('rest-timer');
   if (!el) return;
+  const minus30 = () => { restTimer.end = Math.max(Date.now(), restTimer.end - 30000); tickRestTimer(); };
   el.querySelector('#rt-plus').addEventListener('click', () => { restTimer.end += 30000; tickRestTimer(); });
+  el.querySelector('#rt-minus').addEventListener('click', minus30);
   el.querySelector('#rt-skip').addEventListener('click', stopRestTimer);
   el.querySelector('#rt-sec').addEventListener('change', e => {
     state.settings.restSec = num(e.target.value) || 90;
@@ -736,6 +785,7 @@ function initRestTimer() {
     big.style.display = 'none';
   });
   big.querySelector('#rtb-plus').addEventListener('click', () => { restTimer.end += 30000; tickRestTimer(); });
+  big.querySelector('#rtb-minus').addEventListener('click', minus30);
   big.querySelector('#rtb-skip').addEventListener('click', stopRestTimer);
 }
 
@@ -756,10 +806,20 @@ async function updateWakeLock() {
 document.addEventListener('visibilitychange', () => { updateWakeLock(); });
 
 /* ---------- マイルーチン ---------- */
+function todayRoutineItems(w) {
+  return w.entries.map(e => ({ exId: e.exId, sets: e.sets.map(s => ({ w: s.w ?? null, r: s.r ?? null })) }));
+}
+
 function saveRoutineFromToday(date) {
   const w = workoutOf(date);
   if (!w || !w.entries.length) { toast('保存する種目がありません'); return; }
   const body = sheet('ルーチンとして保存', `
+    ${state.routines.length ? `
+    <div class="qf-label">既存のルーチンに上書き保存</div>
+    <div class="chip-row">
+      ${state.routines.map(r => `<button class="chip" data-rt-ow="${r.id}">⭐ ${esc(r.name)}</button>`).join('')}
+    </div>
+    <div class="qf-label" style="margin-top:12px">または新しく保存</div>` : ''}
     <label class="f-label">ルーチン名
       <input type="text" class="input" id="rt-name" placeholder="例: 胸の日A / ホリデイ60分">
     </label>
@@ -768,14 +828,23 @@ function saveRoutineFromToday(date) {
       <button class="btn ghost" id="rt-cancel">キャンセル</button>
       <button class="btn primary" id="rt-save">保存する</button>
     </div>`);
+  body.querySelectorAll('[data-rt-ow]').forEach(chip => {
+    chip.addEventListener('click', async () => {
+      const rt = state.routines.find(r => r.id === chip.dataset.rtOw);
+      if (!rt) return;
+      if (await confirmDlg(`「${rt.name}」を今日の内容（${w.entries.length}種目）で上書きしますか？`, '上書きする')) {
+        rt.items = todayRoutineItems(w);
+        saveState();
+        renderCurrent();
+        toast(`⭐「${rt.name}」を更新しました`);
+      }
+    });
+  });
   body.querySelector('#rt-cancel').addEventListener('click', closeSheet);
   body.querySelector('#rt-save').addEventListener('click', () => {
     const name = body.querySelector('#rt-name').value.trim();
     if (!name) { toast('名前を入力してください'); return; }
-    state.routines.push({
-      id: uid(), name,
-      items: w.entries.map(e => ({ exId: e.exId, sets: e.sets.map(s => ({ w: s.w ?? null, r: s.r ?? null })) })),
-    });
+    state.routines.push({ id: uid(), name, items: todayRoutineItems(w) });
     saveState();
     closeSheet();
     renderCurrent();
@@ -787,12 +856,24 @@ function openRoutine(rid, date, screenEl) {
   const rt = state.routines.find(r => r.id === rid);
   if (!rt) return;
   const menu = { items: rt.items };
+  const today = workoutOf(date);
+  const canOverwrite = today && today.entries.length > 0;
   const body = sheet(`⭐ ${rt.name}`, `
     <div class="menu-list">${menuItemsHtml(menu)}</div>
     <div class="btn-row">
-      <button class="btn danger ghost" id="rt-del">削除</button>
+      <button class="btn danger ghost" id="rt-del">🗑 削除</button>
+      ${canOverwrite ? '<button class="btn ghost" id="rt-update">今日の内容で上書き</button>' : ''}
       <button class="btn primary" id="rt-apply">今日にセット</button>
     </div>`);
+  const upBtn = body.querySelector('#rt-update');
+  if (upBtn) upBtn.addEventListener('click', async () => {
+    if (await confirmDlg(`「${rt.name}」を今日の内容（${today.entries.length}種目）で上書きしますか？`, '上書きする')) {
+      rt.items = todayRoutineItems(today);
+      saveState();
+      renderCurrent();
+      toast(`⭐「${rt.name}」を更新しました`);
+    }
+  });
   body.querySelector('#rt-apply').addEventListener('click', () => {
     const w = ensureWorkout(date);
     const already = new Set(w.entries.map(e => e.exId));
@@ -812,6 +893,7 @@ function openRoutine(rid, date, screenEl) {
       state.routines = state.routines.filter(r => r.id !== rid);
       saveState();
       renderCurrent();
+      toast(`「${rt.name}」を削除しました`);
     }
   });
 }

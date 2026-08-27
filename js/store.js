@@ -19,6 +19,7 @@ const DEFAULT_STATE = () => ({
   mealFavs: [],                  // {id, name, kcal, p, f, c, items}
   progressPhotos: [],            // {id(photoId), date}
   weeklyReport: null,            // {date, text}
+  advisorChat: [],               // AIアドバイザーの会話 [{role:'user'|'model', text}]
   customExercises: [],           // {id,name,muscle,unit}
   workouts: {},                  // 'YYYY-MM-DD': {entries:[{id,exId,sets:[{w,r,done}]}], memo}
   meals: {},                     // 'YYYY-MM-DD': [{id,time,name,kcal,p,f,c,photo,src,items,note}]
@@ -43,6 +44,7 @@ function loadState() {
       if (!state.routines) state.routines = [];
       if (!state.mealFavs) state.mealFavs = [];
       if (!state.progressPhotos) state.progressPhotos = [];
+      if (!Array.isArray(state.advisorChat)) state.advisorChat = [];
       return;
     }
   } catch (e) { console.warn('loadState failed', e); }
