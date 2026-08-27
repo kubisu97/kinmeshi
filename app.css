@@ -395,8 +395,44 @@ select.input { appearance: none; }
 .cal-line-r { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; flex: none; max-width: 55%; }
 .cal-sec .btn { margin-top: 8px; }
 
-/* タブ5つ用に少し詰める */
-.tabbar button { padding: 4px 8px; }
+/* タブ6つ用に少し詰める */
+.tabbar button { padding: 4px 6px; }
+@media (max-width: 359px) {
+  .tabbar button { padding: 4px 3px; font-size: 9px; }
+}
+
+/* ---------- AIアドバイザー ---------- */
+.adv-sub { font-size: 12px; color: var(--muted); margin: -6px 0 10px; }
+.adv-wrap { display: flex; flex-direction: column; }
+.adv-log {
+  display: flex; flex-direction: column; gap: 8px;
+  height: calc(100vh - 306px);
+  height: calc(100dvh - 306px);
+  min-height: 180px;
+  overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 2px 4px;
+}
+.adv-log .chat-msg { max-width: 88%; }
+/* 会話が短いときは下寄せ（チャットらしく見せる） */
+.adv-log > .chat-msg:first-child { margin-top: auto; }
+.adv-empty {
+  margin: auto; text-align: center; color: var(--muted);
+  font-size: 13px; line-height: 1.7;
+}
+.adv-empty-ic { font-size: 34px; margin-bottom: 6px; }
+.adv-empty p { margin: 0; }
+.adv-chips { padding: 8px 0 2px; margin: 0 -2px; }
+.adv-chips .chip { font-size: 12px; }
+.adv-foot { display: flex; gap: 8px; justify-content: space-between; margin-top: 8px; }
+.adv-foot .btn { flex: 1; }
+.adv-dump {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; line-height: 1.6; color: var(--ink2);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px;
+}
 
 /* ---------- InBody ---------- */
 .ib-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
@@ -484,6 +520,14 @@ select.input { appearance: none; }
 #rt-big .rtb-time {
   font-size: 120px; font-weight: 800; color: var(--c-p);
   font-variant-numeric: tabular-nums; line-height: 1;
+}
+/* タイムアップ演出（消音モードでも目で分かる） */
+#rt-big.rtb-over { animation: rtb-flash .5s ease infinite alternate; }
+#rt-big.rtb-over .rtb-time { color: #ff8a4d; }
+#rt-big.rtb-over .rtb-label { color: #ffb38a; }
+@keyframes rtb-flash {
+  from { background: rgba(10, 10, 10, .97); }
+  to { background: rgba(90, 30, 8, .97); }
 }
 #rt-big .rtb-btns { display: flex; gap: 14px; margin-top: 10px; }
 #rt-big .rtb-btns button {

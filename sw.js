@@ -1,5 +1,5 @@
 /* 筋メシ - Service Worker（オフライン対応） */
-const CACHE = 'kinmeshi-v2.4.0';
+const CACHE = 'kinmeshi-v2.6.0';
 const ASSETS = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const ASSETS = [
   './js/scr-workout.js',
   './js/scr-meals.js',
   './js/scr-calendar.js',
+  './js/scr-advisor.js',
   './js/scr-settings.js',
   './js/app.js',
   './icons/icon-180.png',
