@@ -243,6 +243,27 @@ async function aiWorkoutMenu(prompt) {
   return obj;
 }
 
+/* ---------- AI献立プラン ---------- */
+async function aiMealPlan(prompt) {
+  const text = await geminiGenerate([{ text: prompt }], true);
+  const obj = parseJsonLoose(text);
+  const meals = Array.isArray(obj && obj.meals) ? obj.meals : [];
+  if (!meals.length) throw new Error('献立を作れませんでした。条件を変えてもう一度試してください。');
+  return {
+    title: obj.title || '今日の献立',
+    note: obj.note || '',
+    meals: meals.map(m => ({
+      slot: String(m.slot || '食事'),
+      name: String(m.name || ''),
+      kcal: Math.round(num(m.kcal)),
+      p: round1(num(m.p)),
+      f: round1(num(m.f)),
+      c: round1(num(m.c)),
+      items: Array.isArray(m.items) ? m.items : [],
+    })).filter(m => m.name),
+  };
+}
+
 /* ---------- AI週間レポート ---------- */
 async function aiWeeklyReport(summary) {
   const prompt = `あなたは優秀なパーソナルトレーナー兼管理栄養士です。以下は私の1週間の記録です。

@@ -137,6 +137,133 @@ ${buildAdvisorContext()}
 まずは記録を見た第一印象を、2〜3文で気軽に話しかけてください。`;
 }
 
+/* ---------- 提案の生成（トレーニング / 献立） ---------- */
+
+/* これまでの会話を要約して渡す（希望を反映させるため） */
+function advConversationText() {
+  const hist = advHistory().filter(m => m.text);
+  if (!hist.length) return '（まだ会話なし）';
+  return hist.slice(-8).map(m => `${m.role === 'user' ? '私' : 'あなた'}: ${m.text}`).join('\n');
+}
+
+/* トレーニングメニュー用プロンプト */
+function buildAdvisorMenuPrompt() {
+  const L = [];
+  L.push('あなたは私の専属パーソナルトレーナーです。私の記録をもとに、次のトレーニングメニューを組んでください。');
+  L.push('', '## 私の記録', buildAdvisorContext());
+  L.push('', '## これまでの会話（希望が出ていれば必ず反映すること）', advConversationText());
+  L.push('', `## 使える種目（必ずこの中のexIdを使うこと。他のIDは禁止）`);
+  L.push(`※gym表記: h=${GYMS.h} / l=${GYMS.l}。会話でジムの指定がなければどこの種目を使ってもよい。`);
+  for (const e of allExercises()) {
+    L.push(`${e.id}: ${e.name}（${MUSCLES[e.muscle].label}・${e.unit === 'kg' ? '重量kg×回数' : e.unit === 'min' ? '分（rに分）' : '自重・回数のみ'}・gym:${(e.gyms || ['h', 'l']).join('')}）`);
+  }
+  L.push('', `## ルール
+- 会話で部位・時間・ジム・体調の希望が出ていればそれを最優先。なければ記録から判断する
+- 数日空いている部位を優先。直近のセッションと同じ部位の連続は避ける（同部位は中2〜3日）
+- 重量(w)は【直近14日のトレーニング記録】の実績を基準に漸進的に上げる。実績のない種目は控えめに
+- 自重種目はwを省略、有酸素はrに分数を入れる
+- 指定がなければ4〜6種目（1種目3セット≒10分の目安）
+- rationaleでは必ず私の実際の数字（ボリューム・InBody・最終実施日など）に触れること
+
+必ず次のJSONだけで回答:
+{"title":"メニューの短い名前","rationale":"この構成にした理由（140字以内。私の実データに触れる）","items":[{"exId":"px01","sets":[{"w":60,"r":10},{"w":60,"r":10},{"w":60,"r":8}]}],"advice":"一言アドバイス（60字以内）"}`);
+  return L.join('\n');
+}
+
+/* 献立用プロンプト */
+function buildAdvisorMealPrompt() {
+  const d = todayStr();
+  const g = state.settings.targets;
+  const t = mealTotals(d);
+  const eaten = mealsOf(d);
+  const rem = {
+    kcal: Math.max(0, Math.round(g.kcal - t.kcal)),
+    p: Math.max(0, Math.round(g.p - t.p)),
+    f: Math.max(0, Math.round(g.f - t.f)),
+    c: Math.max(0, Math.round(g.c - t.c)),
+  };
+  const favs = (state.mealFavs || []).slice(0, 12).map(f => `${f.name}(${Math.round(num(f.kcal))}kcal P${Math.round(num(f.p))})`);
+  const recent = [];
+  const seen = new Set();
+  for (let i = 0; i < 14 && recent.length < 12; i++) {
+    for (const m of mealsOf(addDays(d, -i))) {
+      if (seen.has(m.name)) continue;
+      seen.add(m.name);
+      recent.push(`${m.name}(${Math.round(num(m.kcal))}kcal P${Math.round(num(m.p))})`);
+    }
+  }
+  const L = [];
+  L.push('あなたは私の専属管理栄養士です。今日これから食べる献立を組んでください。');
+  L.push('', '## 私の記録', buildAdvisorContext());
+  L.push('', '## 今日の状況');
+  L.push(`現在時刻: ${nowTimeStr()}`);
+  L.push(`今日すでに食べたもの: ${eaten.length ? eaten.map(m => `${m.time || ''}${m.name}(${Math.round(num(m.kcal))}kcal)`).join('、') : 'まだ何も食べていない'}`);
+  L.push(`今日の残り: ${rem.kcal}kcal タンパク質${rem.p}g 脂質${rem.f}g 炭水化物${rem.c}g（目標 ${g.kcal}kcal P${g.p} F${g.f} C${g.c}）`);
+  if (recent.length) L.push(`最近よく食べているもの: ${recent.join('、')}`);
+  if (favs.length) L.push(`登録済みのマイ定食: ${favs.join('、')}`);
+  L.push('', '## これまでの会話（希望が出ていれば必ず反映すること）', advConversationText());
+  L.push('', `## ルール
+- 現在時刻より後の食事だけを提案する（例: 15時なら夕食と間食。朝食は提案しない）
+- 合計が「今日の残り」にだいたい収まるようにする。特にタンパク質は残り分を埋めることを優先
+- 私が最近食べているものや手に入りやすいもの（コンビニ・スーパー・自炊で現実的なもの）を優先。凝った料理は避ける
+- 量は必ず具体的に書く（例「鶏胸肉200g」「白米150g」）
+- 栄養価は日本の一般的な食品成分で計算する
+- 2〜4食（間食含む）にまとめる
+- noteでは残りカロリーとPFCの何をどう埋めたのか、私の実データに触れて説明する
+
+必ず次のJSONだけで回答:
+{"title":"献立の短い名前","note":"この献立にした理由（140字以内）","meals":[{"slot":"夕食","name":"献立の短い名前","kcal":数値,"p":数値,"f":数値,"c":数値,"items":[{"name":"品名","amount":"量（例:200g）"}]}]}`);
+  return L.join('\n');
+}
+
+/* ---------- 提案カードの描画 ---------- */
+
+function advWorkoutCardHtml(menu, idx) {
+  return `
+    <div class="adv-card" data-card="w" data-idx="${idx}">
+      <div class="adv-card-h">🏋️ ${esc(menu.title || 'トレーニングメニュー')}</div>
+      ${menu.rationale ? `<div class="adv-card-note">${esc(menu.rationale)}</div>` : ''}
+      <div class="menu-list">${menuItemsHtml(menu)}</div>
+      ${menu.advice ? `<div class="adv-card-note">💡 ${esc(menu.advice)}</div>` : ''}
+      <div class="adv-card-btns">
+        <button class="btn primary small" data-act="w-apply">今日の筋トレに登録</button>
+        <button class="btn ghost small" data-act="w-routine">⭐ ルーティーン保存</button>
+      </div>
+      <div class="adv-card-hint">直したいときはチャットで言ってから、もう一度メニューボタンを押すと作り直します（例「スクワット抜いて」）</div>
+    </div>`;
+}
+
+function advMealCardHtml(plan, idx) {
+  const sum = plan.meals.reduce((a, m) => ({
+    kcal: a.kcal + num(m.kcal), p: a.p + num(m.p), f: a.f + num(m.f), c: a.c + num(m.c),
+  }), { kcal: 0, p: 0, f: 0, c: 0 });
+  const allDone = plan.meals.every(m => m.done);
+  return `
+    <div class="adv-card" data-card="m" data-idx="${idx}">
+      <div class="adv-card-h">🍽️ ${esc(plan.title || '今日の献立')}</div>
+      ${plan.date && plan.date !== todayStr() ? `<div class="adv-card-note">${esc(fmtDateJa(plan.date))}に作った献立です</div>` : ''}
+      ${plan.note ? `<div class="adv-card-note">${esc(plan.note)}</div>` : ''}
+      <div class="adv-meals">
+        ${plan.meals.map((m, i) => `
+          <div class="adv-meal ${m.done ? 'done' : ''}">
+            <div class="adv-meal-t">
+              <b>${esc(m.slot)}｜${esc(m.name)}</b>
+              <span>${Math.round(num(m.kcal))}kcal ・ P${Math.round(num(m.p))} F${Math.round(num(m.f))} C${Math.round(num(m.c))}</span>
+              ${m.items && m.items.length ? `<small>${esc(m.items.map(x => `${x.name}${x.amount ? ' ' + x.amount : ''}`).join('、'))}</small>` : ''}
+            </div>
+            ${m.done
+              ? '<span class="adv-meal-done">記録済み</span>'
+              : `<button class="btn primary small" data-act="m-eat" data-i="${i}">食べた</button>`}
+          </div>`).join('')}
+      </div>
+      <div class="adv-card-note">合計 ${Math.round(sum.kcal)}kcal ・ P${Math.round(sum.p)} F${Math.round(sum.f)} C${Math.round(sum.c)}</div>
+      ${allDone ? '' : `
+      <div class="adv-card-btns">
+        <button class="btn ghost small" data-act="m-all">まとめて全部記録</button>
+      </div>`}
+    </div>`;
+}
+
 /* ---------- 表示 ---------- */
 
 /* 軽いマークダウン整形（**太字** と ・箇条書き） */
@@ -160,6 +287,141 @@ function advHistory() {
   return state.advisorChat;
 }
 
+/* 提案カードを、API送信用のテキストに変換する（会話の流れを保つため） */
+function advHistForApi() {
+  return advHistory().map(m => {
+    if (m.kind === 'workout' && m.menu) {
+      const list = (m.menu.items || []).map(it => {
+        const ex = exById(it.exId);
+        return ex ? `${ex.name} ${fmtSets(it.sets, ex.unit, ex)}` : null;
+      }).filter(Boolean).join(' / ');
+      return { role: 'model', text: `（トレーニングメニューを提案した: ${m.menu.title || ''} ${list}）` };
+    }
+    if (m.kind === 'meal' && m.plan) {
+      const list = (m.plan.meals || []).map(x => `${x.slot}:${x.name}(${Math.round(num(x.kcal))}kcal P${Math.round(num(x.p))})`).join(' / ');
+      return { role: 'model', text: `（献立を提案した: ${m.plan.title || ''} ${list}）` };
+    }
+    return { role: m.role, text: m.text };
+  }).filter(m => m.text);
+}
+
+/* 提案カードのボタンを配線 */
+function wireAdvCards(log, draw) {
+  const hist = advHistory();
+
+  log.querySelectorAll('[data-act="w-apply"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const menu = hist[+btn.closest('.adv-card').dataset.idx]?.menu;
+      if (!menu) return;
+      const date = todayStr();
+      const w = ensureWorkout(date);
+      const already = new Set(w.entries.map(e => e.exId));
+      let added = 0;
+      for (const it of menu.items) {
+        if (already.has(it.exId)) continue;
+        w.entries.push({
+          id: uid(), exId: it.exId,
+          sets: it.sets.map(s => ({ w: s.w != null ? num(s.w) : null, r: s.r != null ? num(s.r) : null, done: false })),
+        });
+        added++;
+      }
+      saveState();
+      if (!added) { toast('すべて追加済みの種目でした'); return; }
+      App.wDate = date;
+      toast(`今日の筋トレに登録しました（${added}種目）🔥`);
+      switchTab('workout');
+    });
+  });
+
+  log.querySelectorAll('[data-act="w-routine"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const menu = hist[+btn.closest('.adv-card').dataset.idx]?.menu;
+      if (!menu) return;
+      advSaveMenuAsRoutine(menu);
+    });
+  });
+
+  log.querySelectorAll('[data-act="m-eat"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const entry = hist[+btn.closest('.adv-card').dataset.idx];
+      const m = entry && entry.plan && entry.plan.meals[+btn.dataset.i];
+      if (!m || m.done) return;
+      advRecordMeal(m);
+      saveState();
+      toast(`🍽️「${m.name}」を記録しました`);
+      draw(false);
+    });
+  });
+
+  log.querySelectorAll('[data-act="m-all"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const entry = hist[+btn.closest('.adv-card').dataset.idx];
+      const plan = entry && entry.plan;
+      if (!plan) return;
+      const todo = plan.meals.filter(m => !m.done);
+      if (!todo.length) return;
+      if (!(await confirmDlg(`${todo.length}食ぶんをまとめて今日の食事に記録しますか？`, '記録する'))) return;
+      for (const m of todo) advRecordMeal(m);
+      saveState();
+      toast(`🍽️ ${todo.length}食を記録しました`);
+      draw(false);
+    });
+  });
+}
+
+/* 献立の1食を食事記録に追加 */
+function advRecordMeal(m) {
+  const d = todayStr();
+  if (!state.meals[d]) state.meals[d] = [];
+  state.meals[d].push({
+    id: uid(), time: nowTimeStr(), name: m.name,
+    kcal: num(m.kcal), p: num(m.p), f: num(m.f), c: num(m.c),
+    photo: null, src: 'advisor', items: m.items || [],
+  });
+  m.done = true;
+}
+
+/* メニューをルーティーンとして保存 */
+function advSaveMenuAsRoutine(menu) {
+  const items = menu.items.map(it => ({ exId: it.exId, sets: it.sets.map(s => ({ w: s.w ?? null, r: s.r ?? null })) }));
+  const body = sheet('⭐ ルーティーンに保存', `
+    ${state.routines.length ? `
+    <div class="qf-label">既存のルーティーンに上書き</div>
+    <div class="chip-row">
+      ${state.routines.map(r => `<button class="chip" data-ow="${r.id}">⭐ ${esc(r.name)}</button>`).join('')}
+    </div>
+    <div class="qf-label" style="margin-top:12px">または新しく保存</div>` : ''}
+    <label class="f-label">ルーティーン名
+      <input type="text" class="input" id="ar-name" value="${esc(menu.title || '')}" placeholder="例: 胸の日A">
+    </label>
+    <div class="an-note">${menu.items.length}種目（セット・重量ごと）をテンプレとして保存します。</div>
+    <div class="btn-row">
+      <button class="btn ghost" id="ar-cancel">キャンセル</button>
+      <button class="btn primary" id="ar-save">保存する</button>
+    </div>`);
+  body.querySelectorAll('[data-ow]').forEach(chip => {
+    chip.addEventListener('click', async () => {
+      const rt = state.routines.find(r => r.id === chip.dataset.ow);
+      if (!rt) return;
+      if (await confirmDlg(`「${rt.name}」をこのメニュー（${items.length}種目）で上書きしますか？`, '上書きする')) {
+        rt.items = items;
+        saveState();
+        closeSheet();
+        toast(`⭐「${rt.name}」を更新しました`);
+      }
+    });
+  });
+  body.querySelector('#ar-cancel').addEventListener('click', closeSheet);
+  body.querySelector('#ar-save').addEventListener('click', () => {
+    const name = body.querySelector('#ar-name').value.trim();
+    if (!name) { toast('名前を入力してください'); return; }
+    state.routines.push({ id: uid(), name, items });
+    saveState();
+    closeSheet();
+    toast(`⭐「${name}」を保存しました`);
+  });
+}
+
 function renderAdvisor(el) {
   const hist = advHistory();
   const hasKey = !!(state.settings.apiKey || '').trim();
@@ -175,6 +437,10 @@ function renderAdvisor(el) {
       </section>` : `
       <div class="adv-wrap">
         <div class="adv-log" id="adv-log"></div>
+        <div class="adv-actions">
+          <button class="btn ghost small" id="adv-gen-w">🏋️ メニューを作る</button>
+          <button class="btn ghost small" id="adv-gen-m">🍽️ 献立を作る</button>
+        </div>
         <div class="chip-row adv-chips" id="adv-chips">
           ${ADV_CHIPS.map(c => `<button class="chip" data-q="${esc(c)}">${esc(c)}</button>`).join('')}
         </div>
@@ -207,9 +473,14 @@ function renderAdvisor(el) {
         </div>`;
       return;
     }
-    log.innerHTML = hist.map(m =>
-      `<div class="chat-msg ${m.role === 'model' ? 'ai' : 'user'}">${advFmt(m.text)}</div>`
-    ).join('') + (Advisor.busy ? '<div class="chat-msg ai typing">考え中…</div>' : '');
+    log.innerHTML = hist.map((m, i) => {
+      if (m.kind === 'workout' && m.menu) return advWorkoutCardHtml(m.menu, i);
+      if (m.kind === 'meal' && m.plan) return advMealCardHtml(m.plan, i);
+      return `<div class="chat-msg ${m.role === 'model' ? 'ai' : 'user'}">${advFmt(m.text)}</div>`;
+    }).join('') + (Advisor.busy
+      ? `<div class="chat-msg ai typing">${esc(Advisor.busyLabel || '考え中…')}</div>`
+      : '');
+    wireAdvCards(log, draw);
     if (scroll) log.scrollTop = log.scrollHeight;
   };
 
@@ -221,10 +492,11 @@ function renderAdvisor(el) {
     Advisor.busy = true;
     inp.value = ''; Advisor.draft = '';
     sendBtn.disabled = true;
+    genW.disabled = true; genM.disabled = true;
     draw();
     try {
       // 送信のたびに最新の記録でコンテキストを作り直す
-      const payload = [{ role: 'user', text: advisorSystemPrompt() }].concat(hist);
+      const payload = [{ role: 'user', text: advisorSystemPrompt() }].concat(advHistForApi());
       const a = await geminiChat(payload);
       hist.push({ role: 'model', text: a.trim() });
       // 会話が長くなりすぎないよう直近30通に保つ
@@ -236,9 +508,49 @@ function renderAdvisor(el) {
     }
     Advisor.busy = false;
     sendBtn.disabled = false;
+    genW.disabled = false; genM.disabled = false;
     draw();
     inp.focus();
   };
+
+  const genW = el.querySelector('#adv-gen-w');
+  const genM = el.querySelector('#adv-gen-m');
+
+  /* 提案（トレーニングメニュー / 献立）を作る */
+  const generate = async (type) => {
+    if (Advisor.busy) return;
+    const isW = type === 'workout';
+    hist.push({ role: 'user', text: isW ? '🏋️ トレーニングメニューを作って' : '🍽️ 今日の献立を作って' });
+    Advisor.busy = true;
+    Advisor.busyLabel = isW ? '記録を見てメニューを組んでいます…' : '残りカロリーを見て献立を考えています…';
+    genW.disabled = true; genM.disabled = true; sendBtn.disabled = true;
+    draw();
+    try {
+      if (isW) {
+        const menu = await aiWorkoutMenu(buildAdvisorMenuPrompt());
+        menu.items = (menu.items || []).filter(it => exById(it.exId) && Array.isArray(it.sets) && it.sets.length);
+        if (!menu.items.length) throw new Error('使える種目でメニューを作れませんでした。希望を変えてもう一度試してください。');
+        hist.push({ role: 'model', kind: 'workout', menu });
+      } else {
+        const plan = await aiMealPlan(buildAdvisorMealPrompt());
+        plan.date = todayStr();
+        plan.meals.forEach(m => { m.done = false; });
+        hist.push({ role: 'model', kind: 'meal', plan });
+      }
+      if (hist.length > 30) hist.splice(0, hist.length - 30);
+      saveState();
+    } catch (e) {
+      hist.pop();
+      toast(e.message === 'NO_KEY' ? '設定でAPIキーを登録してください' : e.message);
+    }
+    Advisor.busy = false;
+    Advisor.busyLabel = '';
+    genW.disabled = false; genM.disabled = false; sendBtn.disabled = false;
+    draw();
+  };
+
+  genW.addEventListener('click', () => generate('workout'));
+  genM.addEventListener('click', () => generate('meal'));
 
   draw();
   inp.value = Advisor.draft || '';
