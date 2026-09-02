@@ -318,8 +318,7 @@ function openAddExercise(date, screenEl) {
     <input type="search" class="input" id="ex-search" placeholder="種目名・マシン名で検索">
     <div class="chip-row" id="gym-chips">
       <button class="chip gym sel" data-g="all">すべて</button>
-      <button class="chip gym" data-g="h">🏢 ${GYMS.h}</button>
-      <button class="chip gym" data-g="l">🏢 ${GYMS.l}</button>
+      ${Object.keys(GYMS).map(k => `<button class="chip gym" data-g="${k}">🏢 ${esc(GYMS[k])}</button>`).join('')}
     </div>
     <div class="chip-row" id="muscle-chips">
       <button class="chip sel" data-m="all">全部位</button>
@@ -577,8 +576,7 @@ function openAiMenu(date, screenEl) {
     <label class="f-label" style="margin-top:8px">場所
       <select class="input" id="am-gym">
         <option value="all">どこでも</option>
-        <option value="h">🏢 ${GYMS.h}</option>
-        <option value="l">🏢 ${GYMS.l}</option>
+        ${Object.keys(GYMS).map(k => `<option value="${k}">🏢 ${esc(GYMS[k])}</option>`).join('')}
       </select>
     </label>
     <label class="f-label" style="margin-top:8px">メモ（任意）

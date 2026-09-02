@@ -153,7 +153,7 @@ function buildAdvisorMenuPrompt() {
   L.push('', '## 私の記録', buildAdvisorContext());
   L.push('', '## これまでの会話（希望が出ていれば必ず反映すること）', advConversationText());
   L.push('', `## 使える種目（必ずこの中のexIdを使うこと。他のIDは禁止）`);
-  L.push(`※gym表記: h=${GYMS.h} / l=${GYMS.l}。会話でジムの指定がなければどこの種目を使ってもよい。`);
+  L.push(`※gym表記: ${Object.keys(GYMS).map(k => `${k}=${GYMS[k]}`).join(' / ')}。会話でジムの指定がなければどこの種目を使ってもよい。`);
   for (const e of allExercises()) {
     L.push(`${e.id}: ${e.name}（${MUSCLES[e.muscle].label}・${e.unit === 'kg' ? '重量kg×回数' : e.unit === 'min' ? '分（rに分）' : '自重・回数のみ'}・gym:${(e.gyms || ['h', 'l']).join('')}）`);
   }

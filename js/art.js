@@ -424,7 +424,8 @@
     px70: 'pecdeck', px71: 'reardeck', px72: 'curl', px73: 'pressdown', px74: 'crunch',
     px75: 'torso', px76: 'crunch', px77: 'latpull', px78: 'seatedrow', px79: 'backext',
     px80: 'multihip', px81: 'abadd', px82: 'abadd', px83: 'multihip', px84: 'calf',
-    px85: 'squat', px87: 'elliptical', px88: 'bike', px89: 'stepper',
+    px85: 'squat', px86: 'squat', px87: 'elliptical', px88: 'bike', px89: 'stepper',
+    px92: 'curl',
   };
 
   window.exArt = function (exId, cls = '') {
