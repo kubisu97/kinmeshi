@@ -45,6 +45,7 @@ function geminiErrorMessage(status, body) {
 function geminiError(status, body) {
   const e = new Error(geminiErrorMessage(status, body));
   e.status = status;
+  e.apiMessage = body && body.error && body.error.message ? body.error.message : '';
   // 待てば直る可能性があるもの
   e.retryable = status === 429 || status === 503 || (status >= 500 && status < 600);
   // 別のモデルなら通る可能性があるもの（混雑・権限なし・存在しない）
@@ -69,20 +70,20 @@ async function geminiFetchOnce(path, options, timeoutMs) {
     }
     if (e.status === undefined && e.retryable === undefined && /fetch|network|Failed/i.test(e.message)) {
       const n = new Error('ネットワークに繋がりませんでした。電波を確認してください。');
-      n.retryable = true; n.tryOtherModel = false;
+      n.retryable = true; n.tryOtherModel = false; n.network = true;
       throw n;
     }
     throw e;
   } finally { clearTimeout(timer); }
 }
 
-/* 同じモデルで指数バックオフしながら粘る */
-async function geminiFetchRetry(path, options, deadline, timeoutMs = GEMINI_ATTEMPT_MS) {
+/* 同じモデルで指数バックオフしながら粘る。attempt(残り時間ms) を最大 GEMINI_TRIES 回 */
+async function geminiRetry(attempt, deadline) {
   let last;
   for (let i = 0; i < GEMINI_TRIES; i++) {
     if (Date.now() > deadline) break;
     try {
-      return await geminiFetchOnce(path, options, Math.min(timeoutMs, deadline - Date.now()));
+      return await attempt(Math.max(1000, deadline - Date.now()));
     } catch (e) {
       last = e;
       if (!e.retryable || i === GEMINI_TRIES - 1) throw e;
@@ -93,6 +94,10 @@ async function geminiFetchRetry(path, options, deadline, timeoutMs = GEMINI_ATTE
     }
   }
   throw last || new Error('通信できませんでした。もう一度試してください。');
+}
+
+async function geminiFetchRetry(path, options, deadline, timeoutMs = GEMINI_ATTEMPT_MS) {
+  return geminiRetry((left) => geminiFetchOnce(path, options, Math.min(timeoutMs, left)), deadline);
 }
 
 /* モデルを乗り換えながら実行する。通ったモデルは設定に記憶する */
@@ -119,32 +124,185 @@ async function geminiWithFallback(run) {
   throw last || new Error('通信できませんでした。もう一度試してください。');
 }
 
-async function geminiGenerate(parts, jsonMode) {
-  if (!geminiKey()) throw new Error('NO_KEY');
-  const body = {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      temperature: 0.3,
-      ...(jsonMode ? { responseMimeType: 'application/json' } : {}),
+/* ---------- 速さの設定 ----------
+   Gemini 3 は temperature を下げるとループ（延々と生成し続ける）を起こすことがあるので触らない。
+   「考える深さ」は用途で分ける。写真の読み取り・チャットは最速、メニューや献立は少しだけ考える。 */
+const THINK = { fast: 'minimal', light: 'low' };
+
+/* thinkingLevel に対応していないモデルもあるので、弾かれたら段階的に下げる */
+const _thinkRejected = new Map(); // model -> Set(level)
+function thinkingLadder(model, level) {
+  const out = [];
+  if (level) out.push(level);
+  if (level === 'minimal') out.push('low');
+  out.push(null); // 指定なし（モデルの既定）
+  const bad = _thinkRejected.get(model);
+  return [...new Set(out)].filter(lv => !(bad && bad.has(lv)));
+}
+function isThinkingConfigError(e) {
+  return !!e && e.status === 400 && /thinking/i.test(e.apiMessage || e.message || '');
+}
+
+function geminiGenConfig(json, thinking) {
+  const cfg = {};
+  if (json) cfg.responseMimeType = 'application/json';
+  if (thinking) cfg.thinkingConfig = { thinkingLevel: thinking };
+  return cfg;
+}
+
+/* 返答から本文だけ取り出す（思考パートは除く） */
+function geminiTextOf(data) {
+  const cand = data && data.candidates && data.candidates[0];
+  const parts = cand && cand.content && cand.content.parts;
+  return Array.isArray(parts) ? parts.filter(p => !p.thought).map(p => p.text || '').join('') : '';
+}
+function geminiEmptyError() {
+  return new Error('AIから回答が得られませんでした。もう一度試してください。');
+}
+
+/* 1モデルぶんの実行。thinkingLevel が弾かれたら下げて同じモデルで再挑戦 */
+async function geminiRunModel(model, deadline, contents, opts, send) {
+  let last;
+  for (const lv of thinkingLadder(model, opts.thinking)) {
+    const body = { contents, generationConfig: geminiGenConfig(opts.json, lv) };
+    try {
+      return await send(model, body, deadline);
+    } catch (e) {
+      last = e;
+      if (!isThinkingConfigError(e) || lv === null) throw e;
+      if (!_thinkRejected.has(model)) _thinkRejected.set(model, new Set());
+      _thinkRejected.get(model).add(lv);
+    }
+  }
+  throw last || geminiEmptyError();
+}
+
+async function geminiPostGenerate(model, body, deadline) {
+  const data = await geminiFetchRetry(
+    `/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
+      body: JSON.stringify(body),
     },
+    deadline
+  );
+  const text = geminiTextOf(data);
+  if (!text) throw geminiEmptyError();
+  return text;
+}
+
+async function geminiGenerate(parts, jsonMode, thinking = THINK.fast) {
+  if (!geminiKey()) throw new Error('NO_KEY');
+  const contents = [{ role: 'user', parts }];
+  return await geminiWithFallback((model, deadline) =>
+    geminiRunModel(model, deadline, contents, { json: jsonMode, thinking }, geminiPostGenerate));
+}
+
+/* ---------- ストリーミング（できた端から表示） ---------- */
+
+/* SSE（data: {...} の塊）を少しずつ受け取ってJSONにする */
+function geminiSseParser(onJson) {
+  let buf = '';
+  const flush = (block) => {
+    const data = block.split('\n')
+      .filter(l => l.startsWith('data:'))
+      .map(l => l.slice(5).replace(/^ /, ''))
+      .join('\n');
+    if (!data || data === '[DONE]') return;
+    let obj;
+    try { obj = JSON.parse(data); } catch (e) { return; }
+    onJson(obj);
   };
-  return await geminiWithFallback(async (model, deadline) => {
-    const data = await geminiFetchRetry(
-      `/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
-        body: JSON.stringify(body),
-      },
-      deadline
-    );
-    const cand = data && data.candidates && data.candidates[0];
-    const text = cand && cand.content && cand.content.parts
-      ? cand.content.parts.map(p => p.text || '').join('')
-      : '';
-    if (!text) throw new Error('AIから回答が得られませんでした。もう一度試してください。');
+  return {
+    push(chunk) {
+      buf = (buf + chunk).replace(/\r\n/g, '\n');
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) { flush(buf.slice(0, i)); buf = buf.slice(i + 2); }
+    },
+    end() { if (buf.trim()) flush(buf); buf = ''; },
+  };
+}
+
+/* 1回ぶんのストリーム。まだ1文字も出ていない失敗はリトライ可、途中で切れたら出た分を渡す */
+async function geminiStreamOnce(model, body, timeoutMs, onText) {
+  const ctrl = new AbortController();
+  let timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // 文字が届いている間は待つ。GEMINI_ATTEMPT_MS 何も来なければ打ち切り
+  const bump = () => { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(), GEMINI_ATTEMPT_MS); };
+  let text = '';
+  let streamErr = null;
+  try {
+    const res = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      let b = null;
+      try { b = await res.json(); } catch (e) { /* noop */ }
+      throw geminiError(res.status, b);
+    }
+    bump();
+    const parser = geminiSseParser((obj) => {
+      if (obj && obj.error) { streamErr = geminiError(obj.error.code || 500, obj); return; }
+      const piece = geminiTextOf(obj);
+      if (piece) { text += piece; onText(text); }
+    });
+    let raw = '';
+    const feed = (chunk) => { if (raw.length < 200000) raw += chunk; parser.push(chunk); };
+    if (res.body && typeof res.body.getReader === 'function') {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bump();
+        feed(dec.decode(value, { stream: true }));
+        if (streamErr) break;
+      }
+      feed(dec.decode());
+    } else {
+      feed(await res.text());
+    }
+    parser.end();
+    if (streamErr) throw streamErr;
+    if (!text) {
+      // 念のため：SSEではなく普通のJSON（配列）で返ってきた場合も読む
+      try {
+        const j = JSON.parse(raw.trim());
+        const t = (Array.isArray(j) ? j : [j]).map(geminiTextOf).join('');
+        if (t) { text = t; onText(text); }
+      } catch (e) { /* noop */ }
+    }
+    if (!text) throw geminiEmptyError();
     return text;
-  });
+  } catch (e) {
+    let err = e;
+    if (e.name === 'AbortError') {
+      err = new Error('通信がタイムアウトしました。もう一度試してください。');
+      err.retryable = true; err.tryOtherModel = true;
+    } else if (e.status === undefined && e.retryable === undefined && /fetch|network|Failed|load/i.test(e.message || '')) {
+      err = new Error('ネットワークに繋がりませんでした。電波を確認してください。');
+      err.retryable = true; err.tryOtherModel = false; err.network = true;
+    }
+    if (text) {
+      // もう表示し始めているので、やり直すと二重になる。出た分を残して終わる
+      err.partial = text;
+      err.retryable = false; err.tryOtherModel = false;
+    }
+    throw err;
+  } finally { clearTimeout(timer); }
+}
+
+/* 会話をストリーミングで返す。onText(ここまでの全文) が何度も呼ばれる */
+async function geminiChatStream(history, onText, thinking = THINK.fast) {
+  if (!geminiKey()) throw new Error('NO_KEY');
+  const contents = history.map(m => ({ role: m.role, parts: [{ text: m.text }] }));
+  return await geminiWithFallback((model, deadline) =>
+    geminiRunModel(model, deadline, contents, { thinking }, (mdl, body, dl) =>
+      geminiRetry((left) => geminiStreamOnce(mdl, body, Math.min(GEMINI_ATTEMPT_MS, left), onText), dl)));
 }
 
 function parseJsonLoose(text) {
@@ -180,7 +338,7 @@ async function analyzeMealPhoto(dataUrl) {
   const text = await geminiGenerate([
     { inlineData: { mimeType: m[1], data: m[2] } },
     { text: MEAL_PROMPT },
-  ], true);
+  ], true, THINK.light);
   const obj = parseJsonLoose(text);
   if (!obj || !obj.dish) throw new Error('食べ物を認識できませんでした。明るい場所で全体が写るように撮ってみてください。');
   const total = obj.total || {};
@@ -217,7 +375,7 @@ async function analyzeMealText(desc) {
   "note": "推定の注意点があれば短く"
 }
 食べ物が含まれない場合は {"dish": null} とだけ回答してください。`;
-  const text = await geminiGenerate([{ text: prompt }], true);
+  const text = await geminiGenerate([{ text: prompt }], true, THINK.fast);
   const obj = parseJsonLoose(text);
   if (!obj || !obj.dish) throw new Error('食べ物として認識できませんでした。「カツ丼と味噌汁」のように書いてみてください。');
   const total = obj.total || {};
@@ -255,7 +413,7 @@ async function analyzeInBodyPhoto(dataUrl) {
   const text = await geminiGenerate([
     { inlineData: { mimeType: m[1], data: m[2] } },
     { text: INBODY_PROMPT },
-  ], true);
+  ], true, THINK.light);
   const obj = parseJsonLoose(text);
   if (!obj || obj.weight == null) throw new Error('InBodyの結果用紙を認識できませんでした。用紙全体が明るく写るように撮ってみてください。');
   const seg = obj.seg && typeof obj.seg === 'object' ? {
@@ -290,36 +448,20 @@ ${summary}
 この後、私から追加の質問をすることがあります。質問には理由・根拠を添えて、日本語で簡潔（目安200文字以内）に答えてください。`;
 }
 async function aiCoachAdvice(summary) {
-  return await geminiGenerate([{ text: coachPromptText(summary) }], false);
+  return await geminiGenerate([{ text: coachPromptText(summary) }], false, THINK.light);
 }
 
 /* マルチターン会話（アドバイスへの追加質問） */
-async function geminiChat(history) {
+async function geminiChat(history, thinking = THINK.fast) {
   if (!geminiKey()) throw new Error('NO_KEY');
-  const body = {
-    contents: history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
-    generationConfig: { temperature: 0.4 },
-  };
-  const data = await geminiWithFallback(async (model, deadline) => await geminiFetchRetry(
-    `/models/${encodeURIComponent(model)}:generateContent`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
-      body: JSON.stringify(body),
-    },
-    deadline
-  ));
-  const cand = data && data.candidates && data.candidates[0];
-  const text = cand && cand.content && cand.content.parts
-    ? cand.content.parts.map(p => p.text || '').join('')
-    : '';
-  if (!text) throw new Error('AIから回答が得られませんでした。もう一度試してください。');
-  return text;
+  const contents = history.map(m => ({ role: m.role, parts: [{ text: m.text }] }));
+  return await geminiWithFallback((model, deadline) =>
+    geminiRunModel(model, deadline, contents, { thinking }, geminiPostGenerate));
 }
 
 /* ---------- AIトレーニングメニュー生成 ---------- */
 async function aiWorkoutMenu(prompt) {
-  const text = await geminiGenerate([{ text: prompt }], true);
+  const text = await geminiGenerate([{ text: prompt }], true, THINK.light);
   const obj = parseJsonLoose(text);
   if (!obj || !Array.isArray(obj.items) || !obj.items.length) {
     throw new Error('メニューを作れませんでした。条件を変えてもう一度試してください。');
@@ -329,7 +471,7 @@ async function aiWorkoutMenu(prompt) {
 
 /* ---------- AI献立プラン ---------- */
 async function aiMealPlan(prompt) {
-  const text = await geminiGenerate([{ text: prompt }], true);
+  const text = await geminiGenerate([{ text: prompt }], true, THINK.light);
   const obj = parseJsonLoose(text);
   const meals = Array.isArray(obj && obj.meals) ? obj.meals : [];
   if (!meals.length) throw new Error('献立を作れませんでした。条件を変えてもう一度試してください。');
@@ -361,7 +503,7 @@ ${summary}
 🎯 来週の方針（具体的に3つまで。種目名・重量・食品名レベルで）
 
 全体で400字以内。マークダウンの見出し記号は使わず、上の絵文字付き見出しをそのまま使うこと。`;
-  return await geminiGenerate([{ text: prompt }], false);
+  return await geminiGenerate([{ text: prompt }], false, THINK.light);
 }
 
 /* ---------- モデル一覧（接続テスト） ---------- */

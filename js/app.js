@@ -108,6 +108,9 @@ function init() {
 
   initRestTimer();
   switchTab('home');
+
+  // 撮ったあとアプリを閉じても、次に開いたときに解析の続きをする
+  setTimeout(() => { if (typeof resumePendingAnalyses === 'function') resumePendingAnalyses(); }, 1200);
 }
 
 /* 新バージョン通知バナー */

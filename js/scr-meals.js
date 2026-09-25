@@ -8,19 +8,23 @@ function renderMeals(el) {
   const g = state.settings.targets;
   const sugs = mealSuggestions(date);
 
-  const mealsHtml = meals.map((m, i) => `
-    <div class="meal-wrap${m.pending ? ' pending' : ''}">
+  const mealsHtml = meals.map((m, i) => {
+    const busy = m.pending && isMealAnalyzing(m.id);
+    const idle = m.pending && !busy;
+    return `
+    <div class="meal-wrap${busy ? ' analyzing' : ''}${idle ? ' pending' : ''}">
       <button class="card meal-card" data-mi="${i}">
         ${m.photo ? `<img class="meal-thumb" data-photo="${m.photo}" alt="">` : `<div class="meal-thumb noimg">🍽</div>`}
         <div class="meal-info">
-          <div class="meal-name">${esc(m.name)}</div>
-          <div class="meal-meta">${esc(m.time || '')}${m.src === 'ai' ? ' ・ AI解析' : ''}${m.pending ? ' ・ 未解析' : ''}</div>
-          <div class="meal-pfc">P ${Math.round(num(m.p))} ・ F ${Math.round(num(m.f))} ・ C ${Math.round(num(m.c))}</div>
+          <div class="meal-name">${busy && !(m.edited && m.edited.name) ? 'AIが解析中…' : esc(m.name)}</div>
+          <div class="meal-meta">${esc(m.time || '')}${m.src === 'ai' ? ' ・ AI解析' : ''}${busy ? ' ・ 数秒で数値が入ります' : ''}${idle ? ' ・ 未解析' : ''}</div>
+          ${busy ? '' : `<div class="meal-pfc">P ${Math.round(num(m.p))} ・ F ${Math.round(num(m.f))} ・ C ${Math.round(num(m.c))}</div>`}
         </div>
-        <div class="meal-kcal"><b>${Math.round(num(m.kcal))}</b><span>kcal</span></div>
+        <div class="meal-kcal">${busy ? '<span class="spinner"></span>' : `<b>${Math.round(num(m.kcal))}</b><span>kcal</span>`}</div>
       </button>
-      ${m.pending ? `<button class="btn ghost small meal-reanalyze" data-re="${i}">🔄 AIで解析する</button>` : ''}
-    </div>`).join('');
+      ${idle ? `<button class="btn ghost small meal-reanalyze" data-re="${i}">🔄 AIで解析する</button>` : ''}
+    </div>`;
+  }).join('');
 
   el.innerHTML = `
     <header class="screen-head"><h1 class="screen-title">食事</h1></header>
@@ -55,11 +59,7 @@ function renderMeals(el) {
     c.addEventListener('click', () => openMealDetail(+c.dataset.mi));
   });
   el.querySelectorAll('.meal-reanalyze').forEach(b => {
-    b.addEventListener('click', async () => {
-      b.disabled = true; b.textContent = '解析中…';
-      await reanalyzeMeal(+b.dataset.re);
-      if (b.isConnected) { b.disabled = false; b.textContent = '🔄 AIで解析する'; }
-    });
+    b.addEventListener('click', () => { reanalyzeMeal(+b.dataset.re); });
   });
   wireSuggestionCards(el);
   loadThumbs(el);
@@ -93,126 +93,121 @@ async function handlePhotoFile(file) {
   if (!file) return;
   let apiImg, thumb;
   try {
-    [apiImg, thumb] = await Promise.all([downscale(file, 1024, 0.85), downscale(file, 520, 0.72)]);
+    // 解析用は768pxで十分（小さいほど送信が速い）。保存・表示用は520px
+    [apiImg, thumb] = await Promise.all([downscale(file, 768, 0.8), downscale(file, 520, 0.72)]);
   } catch (e) { toast('画像を読み込めませんでした'); return; }
 
-  const body = sheet('AI解析', `
-    <img class="analyze-preview" src="${thumb}" alt="食事の写真">
-    <div class="analyze-status" id="an-status"><span class="spinner"></span> AIが写真を分析しています…</div>
-    <div id="an-result"></div>
-  `);
-
-  try {
-    const r = await analyzeMealPhoto(apiImg);
-    body.querySelector('#an-status').style.display = 'none';
-    renderPhotoMealForm(body, thumb, r, null);
-  } catch (e) {
-    body.querySelector('#an-status').style.display = 'none';
-    const msg = e.message === 'NO_KEY' ? '設定画面でGemini APIキーを設定してください。' : e.message;
-    // AIが落ちても写真は捨てない。このまま手入力でも、あとで解析でも記録できる
-    renderPhotoMealForm(body, thumb, {
-      name: '', kcal: '', p: '', f: '', c: '', items: [], note: '',
-    }, msg);
-  }
-}
-
-/* 写真つき食事の入力フォーム。errMsg があればAI失敗時の表示にする */
-function renderPhotoMealForm(body, thumb, r, errMsg) {
-  const conf = (!errMsg && r.confidence != null && r.confidence < 0.75)
-    ? '<div class="an-note">⚠ 推定に自信がありません。数値を確認してください。</div>' : '';
-  const itemsHtml = r.items && r.items.length ? `
-    <div class="an-items">${r.items.map(i => `<div class="an-item"><span>${esc(i.name)}<small> ${esc(i.amount || '')}</small></span><span>${Math.round(num(i.kcal))}kcal</span></div>`).join('')}</div>` : '';
-
-  body.querySelector('#an-result').innerHTML = `
-    ${errMsg ? `
-      <div class="an-note err">AI解析はできませんでした：${esc(errMsg)}</div>
-      <div class="an-note">写真はこのまま記録できます。あとから解析し直せるので、まずは残しておきましょう。</div>` : ''}
-    ${conf}
-    ${r.note ? `<div class="an-note">${esc(r.note)}</div>` : ''}
-    ${itemsHtml}
-    <div class="form-grid">
-      <label class="f-label">名前<input type="text" class="input" id="an-name" value="${esc(r.name || '')}" placeholder="例: 鶏胸肉と玄米"></label>
-      <div class="grid4">
-        <label class="f-label">kcal<input type="number" inputmode="numeric" class="input" id="an-kcal" value="${r.kcal}"></label>
-        <label class="f-label">P(g)<input type="number" inputmode="decimal" class="input" id="an-p" value="${r.p}"></label>
-        <label class="f-label">F(g)<input type="number" inputmode="decimal" class="input" id="an-f" value="${r.f}"></label>
-        <label class="f-label">C(g)<input type="number" inputmode="decimal" class="input" id="an-c" value="${r.c}"></label>
-      </div>
-      ${errMsg ? `
-        <button class="btn primary big" id="an-save">この内容で記録する</button>
-        <div class="btn-row">
-          <button class="btn ghost" id="an-later">📷 写真だけ先に記録</button>
-          <button class="btn ghost" id="an-retryai">🔄 もう一度AIに聞く</button>
-        </div>` : `
-        <div class="btn-row">
-          <button class="btn ghost" id="an-retry">撮り直す</button>
-          <button class="btn primary" id="an-save">保存する</button>
-        </div>`}
-    </div>`;
-
-  const saveMeal = async (pending) => {
-    const photoId = uid();
-    await photoPut(photoId, thumb);
-    const name = body.querySelector('#an-name').value.trim();
-    const meal = {
-      id: uid(), time: nowTimeStr(),
-      name: name || (pending ? '未解析の食事' : (r.name || '食事')),
-      kcal: num(body.querySelector('#an-kcal').value),
-      p: num(body.querySelector('#an-p').value),
-      f: num(body.querySelector('#an-f').value),
-      c: num(body.querySelector('#an-c').value),
-      photo: photoId,
-      src: errMsg ? (pending ? 'pending' : 'manual') : 'ai',
-      pending: !!pending,
-      items: r.items || [], note: r.note || '',
-    };
-    if (!state.meals[App.mDate]) state.meals[App.mDate] = [];
-    state.meals[App.mDate].push(meal);
-    saveState();
-    closeSheet();
-    renderCurrent();
-    toast(pending ? '📷 写真を記録しました（あとで解析できます）' : '食事を記録しました 🍽');
+  // 撮った瞬間に記録を完了させる。AIの結果は待たない
+  const date = App.mDate;
+  const photoId = uid();
+  await photoPut(photoId, thumb);
+  const meal = {
+    id: uid(), time: nowTimeStr(), name: '未解析の食事',
+    kcal: 0, p: 0, f: 0, c: 0,
+    photo: photoId, src: 'pending', pending: true, items: [], note: '',
   };
-
-  body.querySelector('#an-save').addEventListener('click', () => saveMeal(false));
-  const retry = body.querySelector('#an-retry');
-  if (retry) retry.addEventListener('click', () => { closeSheet(); document.getElementById('photo-input').click(); });
-  const later = body.querySelector('#an-later');
-  if (later) later.addEventListener('click', () => saveMeal(true));
-  const retryAi = body.querySelector('#an-retryai');
-  if (retryAi) retryAi.addEventListener('click', async () => {
-    retryAi.disabled = true; retryAi.textContent = '解析中…';
-    try {
-      const got = await analyzeMealPhoto(thumb);
-      renderPhotoMealForm(body, thumb, got, null);
-      toast('解析できました ✨');
-    } catch (e2) {
-      retryAi.disabled = false; retryAi.textContent = '🔄 もう一度AIに聞く';
-      toast(e2.message === 'NO_KEY' ? '設定でAPIキーを登録してください' : e2.message);
-    }
-  });
+  if (!state.meals[date]) state.meals[date] = [];
+  state.meals[date].push(meal);
+  saveState();
+  toast('📷 記録しました。数値はAIがあとで入れます');
+  startMealAnalysis(date, meal.id, apiImg);
 }
 
-/* 未解析の食事をあとから解析する */
+/* ---------- 裏でのAI解析 ---------- */
+const _mealAnalyzing = new Set(); // 解析中の食事ID（このセッション内だけ）
+let _mealDetailHook = null;       // 詳細シートを開いている間の更新フック
+
+function isMealAnalyzing(id) { return _mealAnalyzing.has(id); }
+
+function findMeal(date, id) {
+  return (state.meals[date] || []).find(x => x.id === id) || null;
+}
+
+/* 食事タブ・ホームを見ているときだけ描き直す（入力中の他タブを邪魔しない） */
+function refreshMealViews() {
+  if (App.tab === 'meals' || App.tab === 'home') renderCurrent();
+}
+
+/* AIの結果を反映。ユーザーが手で直した項目は上書きしない */
+function applyMealAnalysis(m, r) {
+  const ed = m.edited || {};
+  if (!ed.name) m.name = r.name;
+  if (!ed.kcal) m.kcal = r.kcal;
+  if (!ed.p) m.p = r.p;
+  if (!ed.f) m.f = r.f;
+  if (!ed.c) m.c = r.c;
+  m.items = r.items || [];
+  m.note = r.note || '';
+  m.src = 'ai';
+  m.pending = false;
+  delete m.aiTries;
+}
+
+async function startMealAnalysis(date, id, imgDataUrl, { manual = false } = {}) {
+  if (_mealAnalyzing.has(id)) return false;
+  _mealAnalyzing.add(id);
+  refreshMealViews();
+  let ok = false;
+  try {
+    const r = await analyzeMealPhoto(imgDataUrl);
+    const m = findMeal(date, id);
+    if (m) { // 解析中に削除されていたら何もしない
+      applyMealAnalysis(m, r);
+      saveState();
+      if (_mealDetailHook && _mealDetailHook.id === id) _mealDetailHook.refresh(m);
+      toast(`✨ ${m.name} ${Math.round(num(m.kcal))}kcal（タップで修正できます）`, 3200);
+    }
+    ok = true;
+  } catch (e) {
+    const m = findMeal(date, id);
+    if (m && !e.network && e.message !== 'NO_KEY') {
+      m.aiTries = (m.aiTries || 0) + 1;
+      saveState();
+    }
+    if (manual || m) {
+      toast(e.message === 'NO_KEY'
+        ? '設定でAPIキーを登録してください'
+        : `AI解析できませんでした（${e.message}）。写真は記録済みです`, 3200);
+    }
+  } finally {
+    _mealAnalyzing.delete(id);
+    refreshMealViews();
+  }
+  return ok;
+}
+
+/* 未解析の食事をあとから解析する（ボタン） */
 async function reanalyzeMeal(idx) {
-  const meals = mealsOf(App.mDate);
-  const m = meals[idx];
+  const m = mealsOf(App.mDate)[idx];
   if (!m || !m.photo) return;
   const data = await photoGet(m.photo);
   if (!data) { toast('写真が見つかりませんでした'); return; }
-  toast('AIが解析しています…');
-  try {
-    const r = await analyzeMealPhoto(data);
-    m.name = r.name; m.kcal = r.kcal; m.p = r.p; m.f = r.f; m.c = r.c;
-    m.items = r.items || []; m.note = r.note || '';
-    m.src = 'ai'; m.pending = false;
-    saveState();
-    renderCurrent();
-    toast(`✨「${r.name}」として記録しました`);
-  } catch (e) {
-    toast(e.message === 'NO_KEY' ? '設定でAPIキーを登録してください' : e.message);
-  }
+  await startMealAnalysis(App.mDate, m.id, data, { manual: true });
 }
+
+/* アプリを開いた時・戻ってきた時に、途中だった解析を自動で再開する
+   （撮ってすぐ画面を閉じても、次に開けば数字が入っている） */
+let _mealResumeRunning = false;
+async function resumePendingAnalyses() {
+  if (_mealResumeRunning || !state || !state.meals || !geminiKey()) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  _mealResumeRunning = true;
+  try {
+    const dates = [todayStr(), addDays(todayStr(), -1)];
+    const queue = [];
+    for (const d of dates) {
+      for (const m of (state.meals[d] || [])) {
+        if (m.pending && m.photo && !_mealAnalyzing.has(m.id) && (m.aiTries || 0) < 2) queue.push([d, m.id, m.photo]);
+      }
+    }
+    for (const [d, id, photo] of queue.slice(0, 3)) {
+      const data = await photoGet(photo);
+      if (!data) continue;
+      if (!await startMealAnalysis(d, id, data)) break; // 失敗したら今回はここまで
+    }
+  } finally { _mealResumeRunning = false; }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resumePendingAnalyses(); });
 
 function downscale(file, maxSize, quality) {
   return new Promise((resolve, reject) => {
@@ -334,17 +329,21 @@ function openMealDetail(index) {
   if (!m) return;
   const itemsHtml = m.items && m.items.length ? `
     <div class="an-items">${m.items.map(i => `<div class="an-item"><span>${esc(i.name)}<small> ${esc(i.amount || '')}</small></span><span>${Math.round(num(i.kcal))}kcal</span></div>`).join('')}</div>` : '';
+  const busy = m.pending && isMealAnalyzing(m.id);
   const body = sheet('食事の詳細', `
     ${m.photo ? `<img class="analyze-preview" data-photo="${m.photo}" alt="">` : ''}
-    ${m.note ? `<div class="an-note">${esc(m.note)}</div>` : ''}
-    ${itemsHtml}
+    <div class="an-note" id="md-busy" ${busy ? '' : 'style="display:none"'}><span class="spinner"></span> AIが解析中です。終わると空欄に数値が自動で入ります</div>
+    <div id="md-extra">
+      ${m.note ? `<div class="an-note">${esc(m.note)}</div>` : ''}
+      ${itemsHtml}
+    </div>
     <div class="form-grid">
-      <label class="f-label">名前<input type="text" class="input" id="md-name" value="${esc(m.name)}"></label>
+      <label class="f-label">名前<input type="text" class="input" id="md-name" value="${m.pending ? '' : esc(m.name)}" placeholder="${m.pending ? '未解析（手で入れてもOK）' : ''}"></label>
       <div class="grid4">
-        <label class="f-label">kcal<input type="number" inputmode="numeric" class="input" id="md-kcal" value="${num(m.kcal)}"></label>
-        <label class="f-label">P(g)<input type="number" inputmode="decimal" class="input" id="md-p" value="${num(m.p)}"></label>
-        <label class="f-label">F(g)<input type="number" inputmode="decimal" class="input" id="md-f" value="${num(m.f)}"></label>
-        <label class="f-label">C(g)<input type="number" inputmode="decimal" class="input" id="md-c" value="${num(m.c)}"></label>
+        <label class="f-label">kcal<input type="number" inputmode="numeric" class="input" id="md-kcal" value="${m.pending ? '' : num(m.kcal)}"></label>
+        <label class="f-label">P(g)<input type="number" inputmode="decimal" class="input" id="md-p" value="${m.pending ? '' : num(m.p)}"></label>
+        <label class="f-label">F(g)<input type="number" inputmode="decimal" class="input" id="md-f" value="${m.pending ? '' : num(m.f)}"></label>
+        <label class="f-label">C(g)<input type="number" inputmode="decimal" class="input" id="md-c" value="${m.pending ? '' : num(m.c)}"></label>
       </div>
       <label class="f-label">時刻<input type="time" class="input" id="md-time" value="${esc(m.time || '')}"></label>
       <div class="btn-row">
@@ -355,7 +354,33 @@ function openMealDetail(index) {
     </div>
   `);
   loadThumbs(body);
+
+  // 開いた時点の値を覚えておき、保存時は「実際に変えた項目」だけ書き込む
+  // （開いている間にAIの解析が終わっても、古い表示で上書きしないため）
+  const FIELDS = ['name', 'kcal', 'p', 'f', 'c', 'time'];
+  const $in = (k) => body.querySelector(`#md-${k}`);
+  const initial = {};
+  FIELDS.forEach(k => { initial[k] = $in(k).value; });
+  const dirty = (k) => $in(k).value !== initial[k];
+
+  // 開いている間にAIが終わったら、触っていない欄だけ最新の値に差し替える
+  _mealDetailHook = {
+    id: m.id,
+    refresh(mm) {
+      if (!body.isConnected) return;
+      const vals = { name: mm.name, kcal: num(mm.kcal), p: num(mm.p), f: num(mm.f), c: num(mm.c) };
+      for (const k of Object.keys(vals)) {
+        if (!dirty(k)) { $in(k).value = vals[k]; initial[k] = $in(k).value; }
+      }
+      $in('name').placeholder = '';
+      body.querySelector('#md-busy').style.display = 'none';
+      body.querySelector('#md-extra').innerHTML = `
+        ${mm.note ? `<div class="an-note">${esc(mm.note)}</div>` : ''}
+        ${mm.items && mm.items.length ? `<div class="an-items">${mm.items.map(i => `<div class="an-item"><span>${esc(i.name)}<small> ${esc(i.amount || '')}</small></span><span>${Math.round(num(i.kcal))}kcal</span></div>`).join('')}</div>` : ''}`;
+    },
+  };
   body.querySelector('#md-fav').addEventListener('click', () => {
+    if (m.pending && !$in('name').value.trim()) { toast('先に名前を入れてください（または解析が終わるのを待ってください）'); return; }
     saveMealAsFav({
       name: body.querySelector('#md-name').value.trim() || m.name,
       kcal: body.querySelector('#md-kcal').value, p: body.querySelector('#md-p').value,
@@ -364,13 +389,22 @@ function openMealDetail(index) {
     });
   });
   body.querySelector('#md-save').addEventListener('click', () => {
-    m.name = body.querySelector('#md-name').value.trim() || m.name;
-    m.kcal = num(body.querySelector('#md-kcal').value);
-    m.p = num(body.querySelector('#md-p').value);
-    m.f = num(body.querySelector('#md-f').value);
-    m.c = num(body.querySelector('#md-c').value);
-    m.time = body.querySelector('#md-time').value || m.time;
+    const changed = FIELDS.filter(dirty);
+    if (!changed.length) { _mealDetailHook = null; closeSheet(); return; }
+    if (!m.edited) m.edited = {};
+    for (const k of changed) {
+      const v = $in(k).value;
+      if (k === 'name') { if (v.trim()) { m.name = v.trim(); m.edited.name = true; } }
+      else if (k === 'time') { if (v) m.time = v; }
+      else { m[k] = num(v); m.edited[k] = true; }
+    }
+    // 数値を全部自分で入れたら、もうAIを待つ必要はない
+    if (m.pending && ['kcal', 'p', 'f', 'c'].every(k => m.edited[k])) {
+      m.pending = false;
+      m.src = 'manual';
+    }
     saveState();
+    _mealDetailHook = null;
     closeSheet();
     renderCurrent();
     toast('更新しました');
@@ -378,7 +412,9 @@ function openMealDetail(index) {
   body.querySelector('#md-del').addEventListener('click', async () => {
     if (await confirmDlg(`「${m.name}」を削除しますか？`)) {
       if (m.photo) await photoDel(m.photo);
-      meals.splice(index, 1);
+      const at = meals.indexOf(m);
+      if (at >= 0) meals.splice(at, 1);
+      _mealDetailHook = null;
       saveState();
       renderCurrent();
       toast('削除しました');
@@ -454,7 +490,7 @@ function recentMealChipsHtml() {
     const arr = state.meals[d] || [];
     for (let i = arr.length - 1; i >= 0 && recents.length < 8; i--) {
       const m = arr[i];
-      if (!m.name || seen.has(m.name) || favNames.has(m.name)) continue;
+      if (!m.name || m.pending || seen.has(m.name) || favNames.has(m.name)) continue;
       seen.add(m.name);
       recents.push(m);
     }

@@ -1,7 +1,7 @@
 /* 筋メシ - AIアドバイザー（記録を全部見て相談できるチャット） */
 'use strict';
 
-const Advisor = { busy: false, draft: '' };
+const Advisor = { busy: false, draft: '', streamText: '' };
 
 /* ---------- コンテキスト作成（AIに渡す記録の要約） ---------- */
 
@@ -282,6 +282,21 @@ const ADV_CHIPS = [
   '弱い部位どこ？',
 ];
 
+/* ストリーミング中の返答を、いま表示されているログに描く */
+function advPaintLive(text) {
+  const log = document.getElementById('adv-log');
+  if (!log) return;
+  let live = document.getElementById('adv-live');
+  if (!live) {
+    const typing = log.querySelector('.chat-msg.typing');
+    if (typing) { typing.classList.remove('typing'); typing.id = 'adv-live'; live = typing; }
+    else { live = document.createElement('div'); live.className = 'chat-msg ai'; live.id = 'adv-live'; log.appendChild(live); }
+  }
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  live.innerHTML = advFmt(text);
+  if (nearBottom) log.scrollTop = log.scrollHeight;
+}
+
 function advHistory() {
   if (!Array.isArray(state.advisorChat)) state.advisorChat = [];
   return state.advisorChat;
@@ -478,7 +493,9 @@ function renderAdvisor(el) {
       if (m.kind === 'meal' && m.plan) return advMealCardHtml(m.plan, i);
       return `<div class="chat-msg ${m.role === 'model' ? 'ai' : 'user'}">${advFmt(m.text)}</div>`;
     }).join('') + (Advisor.busy
-      ? `<div class="chat-msg ai typing">${esc(Advisor.busyLabel || '考え中…')}</div>`
+      ? (Advisor.streamText
+        ? `<div class="chat-msg ai" id="adv-live">${advFmt(Advisor.streamText)}</div>`
+        : `<div class="chat-msg ai typing">${esc(Advisor.busyLabel || '考え中…')}</div>`)
       : '');
     wireAdvCards(log, draw);
     if (scroll) log.scrollTop = log.scrollHeight;
@@ -494,23 +511,34 @@ function renderAdvisor(el) {
     sendBtn.disabled = true;
     genW.disabled = true; genM.disabled = true;
     draw();
+    Advisor.streamText = '';
     try {
       // 送信のたびに最新の記録でコンテキストを作り直す
       const payload = [{ role: 'user', text: advisorSystemPrompt() }].concat(advHistForApi());
-      const a = await geminiChat(payload);
+      // できた端から表示する（全部書き終わるのを待たない）
+      const a = await geminiChatStream(payload, (full) => { Advisor.streamText = full; advPaintLive(full); });
       hist.push({ role: 'model', text: a.trim() });
       // 会話が長くなりすぎないよう直近30通に保つ
       if (hist.length > 30) hist.splice(0, hist.length - 30);
       saveState();
     } catch (e) {
-      hist.pop();
-      toast(e.message === 'NO_KEY' ? '設定でAPIキーを登録してください' : e.message);
+      if (e.partial && e.partial.trim()) {
+        // 途中まで届いた分は残す
+        hist.push({ role: 'model', text: e.partial.trim() + '\n\n（通信が途中で切れました。続きはもう一度聞いてください）' });
+        saveState();
+      } else {
+        hist.pop();
+        toast(e.message === 'NO_KEY' ? '設定でAPIキーを登録してください' : e.message);
+      }
     }
     Advisor.busy = false;
+    Advisor.streamText = '';
     sendBtn.disabled = false;
     genW.disabled = false; genM.disabled = false;
-    draw();
-    inp.focus();
+    // タブを行き来していたら古い画面を描いても見えないので、今の画面を描き直す
+    if (document.getElementById('adv-log') === log) draw();
+    else if (App.tab === 'advisor') renderCurrent();
+    if (inp.isConnected) inp.focus();
   };
 
   const genW = el.querySelector('#adv-gen-w');
@@ -546,7 +574,8 @@ function renderAdvisor(el) {
     Advisor.busy = false;
     Advisor.busyLabel = '';
     genW.disabled = false; genM.disabled = false; sendBtn.disabled = false;
-    draw();
+    if (document.getElementById('adv-log') === log) draw();
+    else if (App.tab === 'advisor') renderCurrent();
   };
 
   genW.addEventListener('click', () => generate('workout'));
