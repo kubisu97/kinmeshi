@@ -222,6 +222,11 @@ body {
 .meal-wrap { position: relative; }
 .meal-wrap.pending .meal-card { border-color: var(--warn); margin-bottom: 0; }
 .meal-wrap.pending .meal-meta { color: var(--warn); font-weight: 700; }
+.meal-wrap.analyzing .meal-card { border-color: var(--accent); }
+.meal-wrap.analyzing .meal-meta { color: var(--accent); font-weight: 700; }
+.meal-wrap.analyzing .meal-name { animation: pulse 1.2s ease infinite; }
+.meal-kcal .spinner { display: inline-block; width: 20px; height: 20px; }
+.an-note .spinner { display: inline-block; vertical-align: -3px; margin-right: 4px; }
 .meal-reanalyze {
   width: 100%; margin: 0 0 10px; border-top-left-radius: 0; border-top-right-radius: 0;
   border-top: none; border-color: var(--warn); color: var(--warn);

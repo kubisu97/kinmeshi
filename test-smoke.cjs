@@ -28,6 +28,11 @@ page.on('pageerror', e => errs.push(String(e)));
 page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push(m.text()); });
 
 const aiOk = (t) => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: t }] } }] }) });
+// 相談チャットはストリーミング（SSE）
+await page.route('**generativelanguage.googleapis.com/**:streamGenerateContent*', route => route.fulfill({
+  status: 200, contentType: 'text/event-stream',
+  body: ['了解。', 'いい感じだよ。'].map(t => `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: t }] } }] })}\r\n\r\n`).join(''),
+}));
 await page.route('**generativelanguage.googleapis.com/**:generateContent', async route => {
   const b = JSON.parse(route.request().postData() || '{}');
   const p = b.contents.map(c => c.parts.map(x => x.text || '').join('')).join('\n');
@@ -116,8 +121,9 @@ await page.click('.tabbar button[data-tab="advisor"]');
 await page.waitForSelector('#adv-in');
 await page.fill('#adv-in', '調子どう？');
 await page.press('#adv-in', 'Enter');
-await page.waitForSelector('.chat-msg.ai:not(.typing)', { timeout: 20000 });
-check(true, '相談チャットが動く');
+await page.waitForFunction(() => !document.getElementById('adv-live') && !document.querySelector('.chat-msg.typing') && document.querySelectorAll('.chat-msg.ai').length > 0, null, { timeout: 20000 });
+const reply = await page.$$eval('.chat-msg.ai', els => els[els.length - 1].textContent);
+check(reply === '了解。いい感じだよ。', `相談チャットがストリーミングで動く（${reply}）`);
 await page.click('#adv-gen-w');
 await page.waitForSelector('.adv-card[data-card="w"]', { timeout: 20000 });
 check(true, '相談タブのメニュー提案が動く');
@@ -132,7 +138,7 @@ check(true, '献立の「食べた」で記録できる');
 await page.click('.tabbar button[data-tab="settings"]');
 await page.waitForTimeout(300);
 const st = await page.textContent('#screen');
-check(/v2\.9\.0/.test(st), 'バージョン表示が v2.9.0');
+check(/v2\.10\.0/.test(st), 'バージョン表示が v2.10.0');
 check(/InBody連携/.test(st) && /AI設定/.test(st) && /データ/.test(st), '設定の各セクションが出る');
 
 /* タイマー */
