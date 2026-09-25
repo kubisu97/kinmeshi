@@ -142,7 +142,7 @@ function renderSettings(el) {
       </div>
     </section>
 
-    <div class="about">筋メシ v2.8.0 ・ あなた専用の筋トレ＆食事管理</div>
+    <div class="about">筋メシ v2.9.0 ・ あなた専用の筋トレ＆食事管理</div>
   `;
 
   const $ = id => el.querySelector(id);
@@ -216,19 +216,26 @@ function renderSettings(el) {
     out.textContent = '接続しています…';
     try {
       const models = await geminiListModels();
-      out.textContent = `✅ 接続OK！ 使えるモデル ${models.length}件`;
       const sel = $('#st-model');
       const cur = state.settings.model;
       const known = new Set(models);
-      // 現在の選択が使えない場合は先頭の使えるモデルに
       sel.innerHTML = models.map(m => `<option value="${m}" ${m === cur ? 'selected' : ''}>${m}</option>`).join('');
-      if (!known.has(cur) && models.length) {
-        const pick = models.find(m => /flash/.test(m) && !/lite|preview/.test(m)) || models[0];
+      // 使えるモデルの中から、候補リストの優先順で実際に動くものを選ぶ
+      const prefer = GEMINI_FALLBACK_MODELS.filter(m => known.has(m));
+      const pick = known.has(cur) ? cur : (prefer[0] || models.find(m => /flash/.test(m)) || models[0]);
+      if (!pick) { out.textContent = '❌ 使えるモデルが見つかりませんでした。'; return; }
+      if (pick !== cur) {
         sel.value = pick;
         state.settings.model = pick;
         saveState();
-        out.textContent += `。モデルを ${pick} に設定しました。`;
       }
+      // 一覧が取れただけでは足りないので、実際に1回生成させて確かめる
+      out.textContent = `モデル ${pick} を試しています…`;
+      await geminiGenerate([{ text: '「OK」とだけ返してください。' }], false);
+      const now = state.settings.model;
+      sel.value = now;
+      out.textContent = `✅ 接続OK！ モデル: ${now}（使えるモデル ${models.length}件）`;
+      if (now !== cur) out.textContent += ` ／ ${cur} から自動で切り替えました。`;
     } catch (e) {
       out.textContent = `❌ ${e.message === 'NO_KEY' ? 'APIキーを入力してください。' : e.message}`;
     }

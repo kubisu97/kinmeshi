@@ -2,41 +2,121 @@
 'use strict';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/* 優先順。上から順に試す（403/404/混雑なら次へ自動フォールバック） */
 const GEMINI_FALLBACK_MODELS = [
-  'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.1-flash-lite',
 ];
 
+/* 通信のねばり強さ（無料枠は混雑時に503を返すので、待って投げ直せばだいたい通る） */
+const GEMINI_ATTEMPT_MS = 25000;  // 1回あたりの待ち時間
+const GEMINI_TRIES = 3;           // 同じモデルでの試行回数
+const GEMINI_BUDGET_MS = 75000;   // 全体の打ち切り時間（無限クルクル防止）
+const GEMINI_MAX_MODELS = 3;      // 乗り換えるモデル数の上限
+
 function geminiKey() { return (state.settings.apiKey || '').trim(); }
-function geminiModel() { return (state.settings.model || 'gemini-3.5-flash').trim(); }
+function geminiModel() { return (state.settings.model || GEMINI_FALLBACK_MODELS[0]).trim(); }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/* 実際に試すモデルの順番（今の設定を先頭に、残りを候補順で） */
+function geminiModelChain() {
+  const cur = geminiModel();
+  return [cur, ...GEMINI_FALLBACK_MODELS.filter(m => m !== cur)].slice(0, GEMINI_MAX_MODELS);
+}
 
 function geminiErrorMessage(status, body) {
   const apiMsg = body && body.error && body.error.message ? body.error.message : '';
   if (status === 400 && /API key/i.test(apiMsg)) return 'APIキーが正しくありません。設定画面で確認してください。';
   if (status === 400) return 'リクエストエラー: ' + apiMsg;
-  if (status === 401 || status === 403) return 'APIキーが無効か、権限がありません。設定画面で確認してください。';
-  if (status === 404) return `モデル「${geminiModel()}」が見つかりません。設定画面で別のモデルを選んでください。`;
-  if (status === 429) return '無料枠の上限に達しました。1〜2分待つか、明日また試してください。';
+  if (status === 401 || status === 403) return 'APIキーが無効か、権限がありません。設定画面で「接続テスト」を押してください。';
+  if (status === 404) return 'モデルが見つかりません。設定画面で「接続テスト」を押すと自動で直せます。';
+  if (status === 429) return '無料枠の上限に達しました。少し待つか、明日また試してください。';
+  if (status === 503) return 'Googleのサーバーが混雑しています。少し待ってからもう一度試してください。';
   if (status >= 500) return 'Google側で一時的なエラーが発生しています。少し待って再試行してください。';
   return `エラー(${status}): ${apiMsg || '不明なエラー'}`;
 }
 
-async function geminiFetch(path, options, timeoutMs = 60000) {
+/* status付きのエラーを投げる（リトライ判定に使う） */
+function geminiError(status, body) {
+  const e = new Error(geminiErrorMessage(status, body));
+  e.status = status;
+  // 待てば直る可能性があるもの
+  e.retryable = status === 429 || status === 503 || (status >= 500 && status < 600);
+  // 別のモデルなら通る可能性があるもの（混雑・権限なし・存在しない）
+  e.tryOtherModel = e.retryable || status === 403 || status === 404;
+  return e;
+}
+
+async function geminiFetchOnce(path, options, timeoutMs) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${GEMINI_BASE}${path}`, { ...options, signal: ctrl.signal });
     let body = null;
     try { body = await res.json(); } catch (e) { /* noop */ }
-    if (!res.ok) throw new Error(geminiErrorMessage(res.status, body));
+    if (!res.ok) throw geminiError(res.status, body);
     return body;
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('通信がタイムアウトしました。電波の良い場所で再試行してください。');
+    if (e.name === 'AbortError') {
+      const t = new Error('通信がタイムアウトしました。もう一度試してください。');
+      t.retryable = true; t.tryOtherModel = true;
+      throw t;
+    }
+    if (e.status === undefined && e.retryable === undefined && /fetch|network|Failed/i.test(e.message)) {
+      const n = new Error('ネットワークに繋がりませんでした。電波を確認してください。');
+      n.retryable = true; n.tryOtherModel = false;
+      throw n;
+    }
     throw e;
   } finally { clearTimeout(timer); }
+}
+
+/* 同じモデルで指数バックオフしながら粘る */
+async function geminiFetchRetry(path, options, deadline, timeoutMs = GEMINI_ATTEMPT_MS) {
+  let last;
+  for (let i = 0; i < GEMINI_TRIES; i++) {
+    if (Date.now() > deadline) break;
+    try {
+      return await geminiFetchOnce(path, options, Math.min(timeoutMs, deadline - Date.now()));
+    } catch (e) {
+      last = e;
+      if (!e.retryable || i === GEMINI_TRIES - 1) throw e;
+      // 0.8秒 → 2秒 （±30%のゆらぎを入れて同時再送を散らす）
+      const wait = [800, 2000][i] * (0.7 + Math.random() * 0.6);
+      if (Date.now() + wait > deadline) throw e;
+      await sleep(wait);
+    }
+  }
+  throw last || new Error('通信できませんでした。もう一度試してください。');
+}
+
+/* モデルを乗り換えながら実行する。通ったモデルは設定に記憶する */
+async function geminiWithFallback(run) {
+  const deadline = Date.now() + GEMINI_BUDGET_MS;
+  const chain = geminiModelChain();
+  let last;
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    if (Date.now() > deadline) break;
+    try {
+      const out = await run(model, deadline);
+      if (model !== geminiModel()) {
+        state.settings.model = model;
+        saveState();
+        if (typeof toast === 'function') toast(`モデルを ${model} に切り替えました`);
+      }
+      return out;
+    } catch (e) {
+      last = e;
+      if (!e.tryOtherModel || i === chain.length - 1) throw e;
+    }
+  }
+  throw last || new Error('通信できませんでした。もう一度試してください。');
 }
 
 async function geminiGenerate(parts, jsonMode) {
@@ -48,20 +128,23 @@ async function geminiGenerate(parts, jsonMode) {
       ...(jsonMode ? { responseMimeType: 'application/json' } : {}),
     },
   };
-  const data = await geminiFetch(
-    `/models/${encodeURIComponent(geminiModel())}:generateContent`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
-      body: JSON.stringify(body),
-    }
-  );
-  const cand = data && data.candidates && data.candidates[0];
-  const text = cand && cand.content && cand.content.parts
-    ? cand.content.parts.map(p => p.text || '').join('')
-    : '';
-  if (!text) throw new Error('AIから回答が得られませんでした。もう一度試してください。');
-  return text;
+  return await geminiWithFallback(async (model, deadline) => {
+    const data = await geminiFetchRetry(
+      `/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
+        body: JSON.stringify(body),
+      },
+      deadline
+    );
+    const cand = data && data.candidates && data.candidates[0];
+    const text = cand && cand.content && cand.content.parts
+      ? cand.content.parts.map(p => p.text || '').join('')
+      : '';
+    if (!text) throw new Error('AIから回答が得られませんでした。もう一度試してください。');
+    return text;
+  });
 }
 
 function parseJsonLoose(text) {
@@ -217,14 +300,15 @@ async function geminiChat(history) {
     contents: history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
     generationConfig: { temperature: 0.4 },
   };
-  const data = await geminiFetch(
-    `/models/${encodeURIComponent(geminiModel())}:generateContent`,
+  const data = await geminiWithFallback(async (model, deadline) => await geminiFetchRetry(
+    `/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
       body: JSON.stringify(body),
-    }
-  );
+    },
+    deadline
+  ));
   const cand = data && data.candidates && data.candidates[0];
   const text = cand && cand.content && cand.content.parts
     ? cand.content.parts.map(p => p.text || '').join('')
@@ -283,10 +367,10 @@ ${summary}
 /* ---------- モデル一覧（接続テスト） ---------- */
 async function geminiListModels() {
   if (!geminiKey()) throw new Error('NO_KEY');
-  const data = await geminiFetch(`/models?pageSize=100`, {
+  const data = await geminiFetchRetry(`/models?pageSize=100`, {
     method: 'GET',
     headers: { 'x-goog-api-key': geminiKey() },
-  }, 20000);
+  }, Date.now() + 30000, 15000);
   const models = (data.models || [])
     .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
     .map(m => m.name.replace(/^models\//, ''))
