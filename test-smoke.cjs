@@ -89,13 +89,12 @@ await page.click('#mm-save');
 await page.waitForTimeout(500);
 check(await page.$$eval('.meal-card', e => e.length) === 2, '手動で食事を記録できる');
 
-/* 食事: 最近の食事から再記録 */
+/* 食事: いつもの食事から再記録（全履歴・マイ定食も並ぶ） */
 await page.waitForTimeout(200);
-if (await page.$('[data-recent]')) {
-  await page.click('[data-recent]');
-  await page.waitForTimeout(500);
-  check(await page.$$eval('.meal-card', e => e.length) === 3, '最近の食事から再記録できる');
-} else { check(true, '最近の食事から再記録できる（対象なしのためスキップ）'); }
+check(await page.$$eval('.usual [data-usual]', e => e.length) >= 2, 'いつもの食事が食事タブに並ぶ');
+await page.click('.usual [data-usual]');
+await page.waitForTimeout(500);
+check(await page.$$eval('.meal-card', e => e.length) === 3, 'いつもの食事から1タップで再記録できる');
 
 /* 筋トレ: 種目追加 */
 await page.click('.tabbar button[data-tab="workout"]');
@@ -138,7 +137,7 @@ check(true, '献立の「食べた」で記録できる');
 await page.click('.tabbar button[data-tab="settings"]');
 await page.waitForTimeout(300);
 const st = await page.textContent('#screen');
-check(/v2\.10\.0/.test(st), 'バージョン表示が v2.10.0');
+check(/v2\.11\.0/.test(st), 'バージョン表示が v2.11.0');
 check(/InBody連携/.test(st) && /AI設定/.test(st) && /データ/.test(st), '設定の各セクションが出る');
 
 /* タイマー */
