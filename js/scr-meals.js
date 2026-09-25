@@ -44,7 +44,7 @@ function renderMeals(el) {
       <button class="btn quick" id="m-manual">${ICONS.pen}<span>手動で記録</span></button>
     </div>
 
-    ${recentMealChipsHtml()}
+    ${usualMealsHtml()}
 
     ${meals.length ? mealsHtml : '<div class="empty-note">まだ記録がありません。写真を撮ってみましょう 📷</div>'}
 
@@ -54,7 +54,7 @@ function renderMeals(el) {
   wireDateNav(el, 'md', () => App.mDate, v => { App.mDate = v; renderMeals(el); });
   el.querySelector('#m-photo').addEventListener('click', openMealPhoto);
   el.querySelector('#m-manual').addEventListener('click', () => openManualMeal());
-  wireRecentMeals(el, false);
+  wireUsualMeals(el);
   el.querySelectorAll('.meal-card').forEach(c => {
     c.addEventListener('click', () => openMealDetail(+c.dataset.mi));
   });
@@ -125,7 +125,18 @@ function findMeal(date, id) {
 
 /* 食事タブ・ホームを見ているときだけ描き直す（入力中の他タブを邪魔しない） */
 function refreshMealViews() {
-  if (App.tab === 'meals' || App.tab === 'home') renderCurrent();
+  if (App.tab !== 'meals' && App.tab !== 'home') return;
+  // 「いつもの食事」の検索を打っている最中は描き直さない（キーボードが閉じてしまう）。
+  // 入力欄から離れたら描き直す（直後のタップを消さないよう少し待つ）
+  const ae = document.activeElement;
+  if (ae && ae.classList && ae.classList.contains('usual-q') && document.getElementById('screen').contains(ae)) {
+    if (!ae._refreshLater) {
+      ae._refreshLater = true;
+      ae.addEventListener('blur', () => { ae._refreshLater = false; setTimeout(refreshMealViews, 350); }, { once: true });
+    }
+    return;
+  }
+  renderCurrent();
 }
 
 /* AIの結果を反映。ユーザーが手で直した項目は上書きしない */
@@ -228,11 +239,12 @@ function downscale(file, maxSize, quality) {
 }
 
 /* ---------- 手動記録 ---------- */
-function openManualMeal() {
+function openManualMeal(prefill = '') {
   const hasKey = !!state.settings.apiKey;
+  if (prefill) _usualQ = ''; // 検索から来たときは、戻ったあと検索語を残さない
   const body = sheet('食事を記録', `
     ${mealFavChipsHtml()}
-    ${recentMealChipsHtml()}
+    ${usualMealsHtml({ excludeFavs: true })}
     ${hasKey ? `
     <div class="ai-text-box">
       <div class="qf-label">🤖 食べたものを書くだけでAIが計算</div>
@@ -262,7 +274,7 @@ function openManualMeal() {
   `);
   const get = id => body.querySelector(id);
   wireMealFavs(body);
-  wireRecentMeals(body, true);
+  wireUsualMeals(body, { inSheet: true });
 
   // AIテキスト解析
   const aiBtn = get('#mm-ai-btn');
@@ -320,6 +332,17 @@ function openManualMeal() {
     renderCurrent();
     toast('食事を記録しました 🍽');
   });
+
+  // （ボタンの配線が終わってから）
+  if (prefill) {
+    // 検索で見つからなかった名前を入れておき、AIがあればそのまま計算を始める
+    get('#mm-name').value = prefill;
+    const t = get('#mm-ai-text');
+    if (t) t.value = prefill;
+    const b = get('#mm-ai-btn');
+    if (t && b) b.click();
+    else get('#mm-kcal').focus(); // AIが無ければ、すぐ数値を打てるように
+  }
 }
 
 /* ---------- 食事の詳細・編集 ---------- */
@@ -463,67 +486,248 @@ function wireMealFavs(body) {
         return;
       }
       if (editing) return;
-      if (!state.meals[App.mDate]) state.meals[App.mDate] = [];
-      state.meals[App.mDate].push({
-        id: uid(), time: nowTimeStr(), name: fav.name,
-        kcal: num(fav.kcal), p: num(fav.p), f: num(fav.f), c: num(fav.c),
-        photo: null, src: 'fav', items: fav.items || [],
-      });
-      saveState();
-      closeSheet();
-      renderCurrent();
-      toast(`⭐「${fav.name}」を記録しました`);
+      recordUsualMeal(Object.assign({}, fav, { fav: true }), { inSheet: true });
     });
   });
 }
 
-/* ---------- 最近の食事（作り置き向け・直近2週間から再記録） ---------- */
-let _recentMeals = [];
-function recentMealChipsHtml() {
-  const favNames = new Set(state.mealFavs.map(f => f.name));
-  const seen = new Set();
-  const recents = [];
-  const dates = Object.keys(state.meals)
-    .filter(d => d <= todayStr() && daysBetween(d, todayStr()) <= 14)
-    .sort().reverse();
-  for (const d of dates) {
-    const arr = state.meals[d] || [];
-    for (let i = arr.length - 1; i >= 0 && recents.length < 8; i--) {
-      const m = arr[i];
-      if (!m.name || m.pending || seen.has(m.name) || favNames.has(m.name)) continue;
-      seen.add(m.name);
-      recents.push(m);
+/* ---------- いつもの食事（全期間の履歴から・よく食べる順） ----------
+   以前は「直近2週間・新しい順・8件」だけで、それより前に食べたものは打ち直すしかなかった。
+   全期間を名前ごとにまとめ、よく食べる順（最近ほど重く）に並べる。今の時間帯によく食べるものは上に。
+   上位に無くても、検索か「すべて見る」から2タップで届く。 */
+
+let _usualQ = ''; // 食事タブの検索語（裏の解析などで画面が描き直されても消えないように）
+function resetMealSearch() { _usualQ = ''; }
+
+/* 表記ゆれを吸収した比較用の文字列（全角半角・大文字小文字・カタカナ/ひらがな・空白） */
+const _foldMemo = new Map();
+function mealFold(s) {
+  s = String(s || '');
+  let v = _foldMemo.get(s);
+  if (v !== undefined) return v;
+  if (_foldMemo.size > 5000) _foldMemo.clear();
+  v = mealFoldRaw(s);
+  _foldMemo.set(s, v);
+  return v;
+}
+function mealFoldRaw(s) {
+  return s.normalize('NFKC').toLowerCase()
+    .replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60))
+    .replace(/\s+/g, '');
+}
+function mealHourOf(t) { const m = /^(\d{1,2}):/.exec(t || ''); return m ? +m[1] : null; }
+function mealHourGap(a, b) { const d = Math.abs(a - b) % 24; return Math.min(d, 24 - d); }
+
+/* forDate に記録する前提で、候補を点数順に返す */
+function mealHistory(forDate = App.mDate) {
+  const today = todayStr();
+  const nowH = forDate === today ? new Date().getHours() : null; // 過去の日を埋めるときは時間帯を見ない
+  const map = new Map();
+  for (const d of Object.keys(state.meals || {})) {
+    if (d > today) continue;
+    const age = Math.max(0, daysBetween(d, today));
+    for (const m of state.meals[d] || []) {
+      if (!m || !m.name || m.pending) continue;
+      const key = mealFold(m.name);
+      if (!key) continue;
+      let e = map.get(key);
+      if (!e) { e = { key, count: 0, score: 0, stamp: '', photoStamp: '' }; map.set(key, e); }
+      e.count++;
+      let w = Math.exp(-age / 30);                                          // 30日前の記録は約1/3の重み
+      const h = mealHourOf(m.time);
+      if (nowH != null && h != null && mealHourGap(h, nowH) <= 2) w *= 2.5; // いつもこの時間帯に食べている
+      e.score += w;
+      const stamp = `${d} ${m.time || ''}`;
+      if (stamp >= e.stamp) {                                               // 数値は一番新しい記録のものを使う
+        Object.assign(e, { stamp, last: d, name: m.name, kcal: num(m.kcal), p: num(m.p), f: num(m.f), c: num(m.c), items: m.items || [] });
+      }
+      if (m.photo && stamp >= e.photoStamp) { e.photo = m.photo; e.photoStamp = stamp; } // 一覧で思い出す手がかり
     }
-    if (recents.length >= 8) break;
   }
-  _recentMeals = recents;
-  if (!recents.length) return '';
+  // マイ定食は必ず候補に入れ、少し優先する（数値はマイ定食に登録した内容）
+  for (const f of state.mealFavs || []) {
+    const key = mealFold(f.name);
+    if (!key) continue;
+    const e = map.get(key) || { key, count: 0, score: 0 };
+    Object.assign(e, { fav: true, name: f.name, kcal: num(f.kcal), p: num(f.p), f: num(f.f), c: num(f.c), items: f.items || [] });
+    e.score += 1.5;
+    map.set(key, e);
+  }
+  // その日にもう記録したものは下げる（同じものを二重に押しにくく）
+  const done = new Set((state.meals[forDate] || []).filter(m => m && m.name && !m.pending).map(m => mealFold(m.name)));
+  for (const e of map.values()) { if (done.has(e.key)) { e.score *= 0.3; e.doneToday = true; } }
+  return [...map.values()].sort((a, b) => (b.score - a.score) || String(b.stamp || '').localeCompare(String(a.stamp || '')));
+}
+
+/* 検索：名前で一致 → 中身（品目名）で一致 → よく食べるもの（プリセット）の順。各グループ内はよく食べる順 */
+function searchMeals(query, hist) {
+  const q = mealFold(query);
+  if (!q) return [];
+  const byName = [], byItem = [];
+  for (const e of hist) {
+    if (mealFold(e.name).includes(q)) byName.push(e);
+    else if ((e.items || []).some(it => mealFold(it.name).includes(q))) byItem.push(e);
+  }
+  const out = byName.concat(byItem);
+  const have = new Set(out.map(e => e.key));
+  for (const f of QUICK_FOODS) {
+    const key = mealFold(f.name);
+    if (have.has(key) || !key.includes(q)) continue;
+    have.add(key);
+    out.push({ key, quick: true, name: f.name, kcal: f.kcal, p: f.p, f: f.f, c: f.c, items: [], count: 0 });
+  }
+  return out.slice(0, 30);
+}
+
+/* 「・」区切りの補足。途中で折り返すなら区切りの位置で（「記録済」「み」のように割れないように） */
+function metaJoin(parts) { return parts.filter(Boolean).map(x => `<span class="nw">${x}</span>`).join(' ・ '); }
+
+function usualChipHtml(e, i) {
+  const meta = [`${Math.round(num(e.kcal))}kcal`, `P${Math.round(num(e.p))}`];
+  if (e.doneToday) meta.push('✓記録済み');
+  else if (e.count >= 2) meta.push(`${e.count}回`);
   return `
-    <div class="qf-label">🕐 最近の食事（2週間・タップで再記録）</div>
-    <div class="qf-grid" id="recent-grid">
-      ${recents.map((m, i) => `
-        <button class="qf-chip" data-recent="${i}">
-          ${esc(m.name)}<small>${Math.round(num(m.kcal))}kcal ・ P${Math.round(num(m.p))}</small>
-        </button>`).join('')}
+    <button class="qf-chip${e.fav ? ' fav' : ''}${e.doneToday ? ' done-today' : ''}" data-usual="${i}">
+      <span class="usual-name">${e.fav ? '⭐ ' : ''}${esc(e.name)}</span><small>${metaJoin(meta)}</small>
+    </button>`;
+}
+
+/* 食事タブ／手動記録シートに置く「いつもの食事」ブロック（中身は wireUsualMeals で描く） */
+function usualMealsHtml({ excludeFavs = false } = {}) {
+  return `
+    <div class="usual" data-exclude-favs="${excludeFavs ? 1 : 0}">
+      <div class="usual-head">
+        <div class="qf-label">🍽 いつもの食事（タップで記録）</div>
+        <button class="usual-all" type="button">すべて見る</button>
+      </div>
+      <input type="search" class="input usual-q" placeholder="🔍 食べたものを探す（例: カレー）" autocomplete="off" enterkeyhint="search" aria-label="食べたものを探す">
+      <div class="qf-grid usual-grid"></div>
     </div>`;
 }
 
-function wireRecentMeals(root, inSheet) {
-  root.querySelectorAll('[data-recent]').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const m = _recentMeals[+chip.dataset.recent];
-      if (!m) return;
-      if (!state.meals[App.mDate]) state.meals[App.mDate] = [];
-      state.meals[App.mDate].push({
-        id: uid(), time: nowTimeStr(), name: m.name,
-        kcal: num(m.kcal), p: num(m.p), f: num(m.f), c: num(m.c),
-        photo: null, src: 'recent', items: m.items || [],
-      });
-      saveState();
-      if (inSheet) closeSheet();
-      renderCurrent();
-      toast(`🕐「${m.name}」を記録しました`);
-    });
+/* 候補を1つ記録する。押し間違えてもすぐ戻せるよう、取り消しボタンつきの通知を出す */
+function recordUsualMeal(e, { inSheet = false } = {}) {
+  const date = App.mDate;
+  if (!state.meals[date]) state.meals[date] = [];
+  const meal = {
+    id: uid(), time: nowTimeStr(), name: e.name,
+    kcal: num(e.kcal), p: num(e.p), f: num(e.f), c: num(e.c),
+    photo: null, // 写真は使い回さない（元の記録を消したときに写真も消えるため）
+    src: e.fav ? 'fav' : (e.quick ? 'quick' : 'recent'),
+    items: (e.items || []).map(it => Object.assign({}, it)),
+  };
+  state.meals[date].push(meal);
+  saveState();
+  _usualQ = '';
+  if (inSheet) closeSheet();
+  renderCurrent();
+  toastUndo(`${e.fav ? '⭐' : '🍽'}「${e.name}」を記録しました`, () => {
+    const arr = state.meals[date] || [];
+    const at = arr.findIndex(x => x.id === meal.id);
+    if (at < 0) return;
+    arr.splice(at, 1);
+    saveState();
+    renderCurrent();
+    toast('取り消しました');
+  });
+}
+
+/* Enterでキーボードを閉じる（日本語の変換確定のEnterは除く） */
+function blurOnEnter(input) {
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
+    ev.preventDefault();
+    input.blur();
+  });
+}
+
+function wireUsualMeals(root, { inSheet = false } = {}) {
+  const box = root.querySelector('.usual');
+  if (!box) return;
+  const grid = box.querySelector('.usual-grid');
+  const input = box.querySelector('.usual-q');
+  const allBtn = box.querySelector('.usual-all');
+  const full = mealHistory();
+  // 手動記録シートではマイ定食が上に並んでいるので、ここには出さない
+  const all = box.dataset.excludeFavs === '1' ? full.filter(e => !e.fav) : full;
+  let shown = [];
+  if (!inSheet) input.value = _usualQ;
+
+  const paint = () => {
+    const q = input.value.trim();
+    shown = q ? searchMeals(q, all) : all.slice(0, 8);
+    let html = shown.map(usualChipHtml).join('');
+    if (q) {
+      if (!shown.length) html += `<div class="usual-empty">「${esc(q)}」の記録はまだありません</div>`;
+      html += `<button class="qf-chip new" type="button" data-usual-new="1">＋「${esc(q)}」を新しく記録<small>${state.settings.apiKey ? 'AIがカロリーを計算します' : '数値を入れて記録'}</small></button>`;
+    } else if (!shown.length) {
+      html = '<div class="usual-empty">一度記録した食事は、ここからタップで同じものを記録できます</div>';
+    }
+    grid.innerHTML = html;
+    allBtn.style.display = !q && full.length > shown.length ? '' : 'none';
+    allBtn.textContent = `すべて見る（${full.length}）`;
+  };
+  paint();
+
+  input.addEventListener('input', () => { if (!inSheet) _usualQ = input.value; paint(); });
+  blurOnEnter(input);
+  grid.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('[data-usual]');
+    if (chip) { const e = shown[+chip.dataset.usual]; if (e) recordUsualMeal(e, { inSheet }); return; }
+    if (!ev.target.closest('[data-usual-new]')) return;
+    const name = input.value.trim();
+    if (!inSheet) {
+      // 名前は手動記録へ引き継ぎ、食事タブの検索は空に戻す
+      input.value = ''; _usualQ = ''; paint();
+      openManualMeal(name);
+      return;
+    }
+    // 手動記録シートの中なら、その場の入力欄に入れる
+    const n = root.querySelector('#mm-name');
+    const t = root.querySelector('#mm-ai-text');
+    const b = root.querySelector('#mm-ai-btn');
+    if (n) n.value = name;
+    if (t) t.value = name;
+    if (t && b && !b.disabled) b.click();
+    else (n || input).focus();
+  });
+  allBtn.addEventListener('click', () => openAllUsualMeals());
+}
+
+/* 全部の候補を一覧で（「あれ何だったっけ」を写真と日付で思い出す用） */
+function openAllUsualMeals() {
+  const all = mealHistory();
+  const body = sheet(`いつもの食事（${all.length}）`, `
+    <input type="search" class="input usual-q" id="ua-q" placeholder="🔍 名前や中身で探す" autocomplete="off" enterkeyhint="search" aria-label="名前や中身で探す">
+    <div class="usual-list" id="ua-list"></div>`);
+  const input = body.querySelector('#ua-q');
+  const list = body.querySelector('#ua-list');
+  let shown = [];
+  const paint = () => {
+    const q = input.value.trim();
+    shown = q ? searchMeals(q, all) : all;
+    list.innerHTML = shown.length ? shown.map((e, i) => `
+      <button class="usual-row${e.doneToday ? ' done-today' : ''}" type="button" data-ua="${i}">
+        ${e.photo ? `<img class="usual-thumb" data-photo="${esc(e.photo)}" alt="">` : '<span class="usual-thumb noimg">🍽</span>'}
+        <span class="usual-row-text">
+          <span class="usual-row-name">${e.fav ? '⭐ ' : ''}${esc(e.name)}</span>
+          <span class="usual-row-meta">${metaJoin([
+            `${Math.round(num(e.kcal))}kcal`,
+            `P${Math.round(num(e.p))} F${Math.round(num(e.f))} C${Math.round(num(e.c))}`,
+            e.count ? `${e.count}回` : '',
+            e.last ? `最後 ${esc(fmtDateJa(e.last))}` : '',
+            e.doneToday ? '✓記録済み' : '',
+          ])}</span>
+        </span>
+      </button>`).join('') : `<div class="usual-empty">${q ? `「${esc(q)}」の記録はまだありません` : 'まだ記録がありません'}</div>`;
+    loadThumbs(list);
+  };
+  paint();
+  input.addEventListener('input', paint);
+  blurOnEnter(input);
+  list.addEventListener('click', (ev) => {
+    const row = ev.target.closest('[data-ua]');
+    if (row) { const e = shown[+row.dataset.ua]; if (e) recordUsualMeal(e, { inSheet: true }); }
   });
 }
 

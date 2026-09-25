@@ -12,6 +12,7 @@ const App = {
 
 function switchTab(tab) {
   App.tab = tab;
+  if (typeof resetMealSearch === 'function') resetMealSearch(); // タブを移ったら食事の検索語は消す
   document.querySelectorAll('.tabbar button').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
   });
@@ -98,7 +99,8 @@ function init() {
       setInterval(check, 60 * 60 * 1000);
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
-        if (!nw) return;
+        // 初めて開いたとき（まだ古い版が無い）は「更新」ではないので出さない
+        if (!nw || !navigator.serviceWorker.controller) return;
         nw.addEventListener('statechange', () => {
           if (nw.state === 'activated') showUpdateBar();
         });

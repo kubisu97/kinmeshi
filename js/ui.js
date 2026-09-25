@@ -34,7 +34,30 @@ function closeSheet() {
 function toast(msg, ms = 2200) {
   const t = document.getElementById('toast');
   t.textContent = msg;
+  t.classList.remove('has-action');
   t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* 「取り消す」ボタンつきの通知（1タップ記録の押し間違えをすぐ戻せるように） */
+function toastUndo(msg, onUndo, ms = 5000) {
+  const t = document.getElementById('toast');
+  t.textContent = '';
+  const label = document.createElement('span');
+  label.className = 'toast-msg';
+  label.textContent = msg;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'toast-undo';
+  btn.textContent = '取り消す';
+  btn.addEventListener('click', () => {
+    clearTimeout(t._t);
+    t.classList.remove('show');
+    onUndo();
+  }, { once: true });
+  t.append(label, btn);
+  t.classList.add('show', 'has-action');
   clearTimeout(t._t);
   t._t = setTimeout(() => t.classList.remove('show'), ms);
 }
