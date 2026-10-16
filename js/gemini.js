@@ -393,6 +393,42 @@ async function analyzeMealText(desc) {
   };
 }
 
+/* ---------- 名前だけの食事をまとめて推定（CSV取り込み用） ----------
+   1件ずつ聞くと無料枠の回数制限にすぐ当たるので、最大25件を1回の通信で聞く。
+   戻り値は入力と同じ並び。推定できなかったものは null */
+const MEAL_BATCH_MAX = 25;
+async function analyzeMealTextBatch(descs) {
+  if (!descs.length) return [];
+  const list = descs.map((d, i) => `${i + 1}. ${String(d || '').replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
+  const prompt = `あなたは経験豊富な管理栄養士です。次の${descs.length}件は、私が食べた食事の記録です。
+それぞれ1回分の合計の栄養価を推定してください。量の記載がないものは日本の一般的な1人前で計算してください。
+コンビニやチェーン店の商品名が書かれていれば、その商品の一般的な栄養成分で計算してください。
+
+${list}
+
+必ず次のJSON形式だけで回答してください（説明文は不要）。"i" は上の番号で、${descs.length}件すべてを返してください:
+{"meals": [{"i": 1, "kcal": 数値, "p": タンパク質g, "f": 脂質g, "c": 炭水化物g}]}
+食べ物として認識できないものは {"i": 番号, "kcal": null} としてください。`;
+  const text = await geminiGenerate([{ text: prompt }], true, THINK.fast);
+  let obj = null;
+  try { obj = parseJsonLoose(text); } catch (e) {
+    const m = String(text).match(/\[[\s\S]*\]/); // 配列だけで返ってきた場合
+    if (m) { try { obj = JSON.parse(m[0]); } catch (e2) { /* noop */ } }
+  }
+  const arr = Array.isArray(obj) ? obj : (obj && Array.isArray(obj.meals) ? obj.meals : null);
+  if (!arr) throw new Error('AIの返答を読み取れませんでした');
+  const out = descs.map(() => null);
+  arr.forEach((r, k) => {
+    if (!r || typeof r !== 'object') return;
+    let at = Number(r.i) - 1;
+    if (!(Number.isInteger(at) && at >= 0 && at < descs.length)) at = arr.length === descs.length ? k : -1;
+    const kcal = num(r.kcal);
+    if (at < 0 || r.kcal == null || !(kcal > 0)) return;
+    out[at] = { kcal: Math.round(kcal), p: round1(num(r.p)), f: round1(num(r.f)), c: round1(num(r.c)) };
+  });
+  return out;
+}
+
 /* ---------- InBody結果用紙の読み取り ---------- */
 const INBODY_PROMPT = `この画像は体成分分析（InBodyなど）の結果用紙、またはInBodyアプリの画面スクリーンショットです。次の項目を読み取ってください。
 必ず次のJSON形式だけで回答してください（説明文は不要）:

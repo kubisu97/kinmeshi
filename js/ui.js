@@ -31,8 +31,10 @@ function closeSheet() {
   root.innerHTML = '';
 }
 
-function toast(msg, ms = 2200) {
+function toast(msg, ms = 2200, { soft = false } = {}) {
   const t = document.getElementById('toast');
+  // soft: 「取り消す」ボタンが出ている間は割り込まない（押したいボタンが消えないように）
+  if (soft && t.classList.contains('has-action') && t.classList.contains('show')) return;
   t.textContent = msg;
   t.classList.remove('has-action');
   t.classList.add('show');
@@ -60,6 +62,30 @@ function toastUndo(msg, onUndo, ms = 5000) {
   t.classList.add('show', 'has-action');
   clearTimeout(t._t);
   t._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* テキストのファイルを保存する。iPhoneでは共有シート（「"ファイル"に保存」など）を出す
+   ※ホーム画面に追加したアプリではダウンロードが効かないことがあるため */
+async function saveTextFile(filename, text, mime = 'text/csv') {
+  const blob = new Blob(['\ufeff' + text], { type: `${mime};charset=utf-8` }); // BOM付き＝Excelで文字化けしない
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (ios && navigator.canShare) {
+    try {
+      const file = new File([blob], filename, { type: mime });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return 'shared';
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancel';
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return 'downloaded';
 }
 
 function confirmDlg(msg, okLabel = '削除する') {

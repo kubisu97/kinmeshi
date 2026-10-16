@@ -134,6 +134,10 @@ function renderSettings(el) {
       <h2 class="card-title">データ</h2>
       <div class="form-grid">
         <div class="btn-row">
+          <button class="btn ghost" id="st-meal-csv">📄 食事をCSVで取り込む</button>
+          <button class="btn ghost" id="st-meal-out">📤 食事をCSVで書き出す</button>
+        </div>
+        <div class="btn-row">
           <button class="btn ghost" id="st-export">バックアップ書き出し</button>
           <button class="btn ghost" id="st-import">読み込み</button>
         </div>
@@ -142,7 +146,7 @@ function renderSettings(el) {
       </div>
     </section>
 
-    <div class="about">筋メシ v2.11.0 ・ あなた専用の筋トレ＆食事管理</div>
+    <div class="about">筋メシ v2.12.0 ・ あなた専用の筋トレ＆食事管理</div>
   `;
 
   const $ = id => el.querySelector(id);
@@ -249,6 +253,11 @@ function renderSettings(el) {
   });
 
   // データ
+  $('#st-meal-csv').addEventListener('click', () => openMealImport());
+  $('#st-meal-out').addEventListener('click', async () => {
+    const r = await saveTextFile(`kinmeshi_meals_${todayStr().replace(/-/g, '')}.csv`, mealsCsvText());
+    if (r !== 'cancel') toast('食事の記録をCSVで書き出しました');
+  });
   $('#st-export').addEventListener('click', () => exportData().then(() => toast('バックアップを書き出しました')));
   $('#st-import').addEventListener('click', () => document.getElementById('import-input').click());
   $('#st-reset').addEventListener('click', async () => {

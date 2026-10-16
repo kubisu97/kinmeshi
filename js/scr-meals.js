@@ -43,6 +43,7 @@ function renderMeals(el) {
       <button class="btn quick" id="m-photo">${ICONS.camera}<span>写真でAI解析</span></button>
       <button class="btn quick" id="m-manual">${ICONS.pen}<span>手動で記録</span></button>
     </div>
+    ${bulkLinkHtml()}
 
     ${usualMealsHtml()}
 
@@ -54,6 +55,7 @@ function renderMeals(el) {
   wireDateNav(el, 'md', () => App.mDate, v => { App.mDate = v; renderMeals(el); });
   el.querySelector('#m-photo').addEventListener('click', openMealPhoto);
   el.querySelector('#m-manual').addEventListener('click', () => openManualMeal());
+  el.querySelector('#m-bulk').addEventListener('click', () => openMealImport());
   wireUsualMeals(el);
   el.querySelectorAll('.meal-card').forEach(c => {
     c.addEventListener('click', () => openMealDetail(+c.dataset.mi));
@@ -63,6 +65,16 @@ function renderMeals(el) {
   });
   wireSuggestionCards(el);
   loadThumbs(el);
+}
+
+/* 「まとめて入力」の入口。記録が何日か空いていたら、その期間も出す */
+function bulkLinkHtml() {
+  const gap = typeof mealGap === 'function' ? mealGap() : null;
+  return `
+    <button class="bulk-link${gap ? ' has-gap' : ''}" id="m-bulk" type="button">
+      <span>📄 まとめて入力（CSV・貼り付け）</span>
+      ${gap ? `<span class="bulk-gap">${esc(fmtDateJa(gap.from))}〜${esc(fmtDateJa(gap.to))}の${gap.days}日分が空いています</span>` : ''}
+    </button>`;
 }
 
 function loadThumbs(root) {
@@ -115,6 +127,8 @@ async function handlePhotoFile(file) {
 
 /* ---------- 裏でのAI解析 ---------- */
 const _mealAnalyzing = new Set(); // 解析中の食事ID（このセッション内だけ）
+const _mealLastFail = new Map();  // 直前に失敗した食事ID → 時刻（すぐ自動で再挑戦して失敗を重ねないように）
+const recentlyFailed = (id) => Date.now() - (_mealLastFail.get(id) || -Infinity) < 120000;
 let _mealDetailHook = null;       // 詳細シートを開いている間の更新フック
 
 function isMealAnalyzing(id) { return _mealAnalyzing.has(id); }
@@ -170,6 +184,7 @@ async function startMealAnalysis(date, id, imgDataUrl, { manual = false } = {}) 
     }
     ok = true;
   } catch (e) {
+    _mealLastFail.set(id, Date.now());
     const m = findMeal(date, id);
     if (m && !e.network && e.message !== 'NO_KEY') {
       m.aiTries = (m.aiTries || 0) + 1;
@@ -190,7 +205,9 @@ async function startMealAnalysis(date, id, imgDataUrl, { manual = false } = {}) 
 /* 未解析の食事をあとから解析する（ボタン） */
 async function reanalyzeMeal(idx) {
   const m = mealsOf(App.mDate)[idx];
-  if (!m || !m.photo) return;
+  if (!m) return;
+  if (m.aiText) { await startMealTextAnalyses([{ date: App.mDate, id: m.id }], { manual: true }); return; }
+  if (!m.photo) return;
   const data = await photoGet(m.photo);
   if (!data) { toast('写真が見つかりませんでした'); return; }
   await startMealAnalysis(App.mDate, m.id, data, { manual: true });
@@ -208,15 +225,80 @@ async function resumePendingAnalyses() {
     const queue = [];
     for (const d of dates) {
       for (const m of (state.meals[d] || [])) {
-        if (m.pending && m.photo && !_mealAnalyzing.has(m.id) && (m.aiTries || 0) < 2) queue.push([d, m.id, m.photo]);
+        if (m.pending && m.photo && !_mealAnalyzing.has(m.id) && (m.aiTries || 0) < 2 && !recentlyFailed(m.id)) queue.push([d, m.id, m.photo]);
       }
     }
+    let ok = true;
     for (const [d, id, photo] of queue.slice(0, 3)) {
       const data = await photoGet(photo);
       if (!data) continue;
-      if (!await startMealAnalysis(d, id, data)) break; // 失敗したら今回はここまで
+      if (!await startMealAnalysis(d, id, data)) { ok = false; break; } // 失敗したら今回はここまで
+    }
+    // CSVなどで名前だけ入った記録（写真なし）は、古い日付でもまとめて1回で計算する
+    if (ok) {
+      const since = addDays(todayStr(), -45);
+      const jobs = [];
+      for (const d of Object.keys(state.meals)) {
+        if (d < since) continue;
+        for (const m of (state.meals[d] || [])) {
+          if (m && m.pending && m.aiText && !_mealAnalyzing.has(m.id) && (m.aiTries || 0) < 2 && !recentlyFailed(m.id)) jobs.push({ date: d, id: m.id });
+        }
+      }
+      if (jobs.length) await startMealTextAnalyses(jobs.slice(0, MEAL_BATCH_MAX * 2));
     }
   } finally { _mealResumeRunning = false; }
+}
+
+/* 名前だけの記録の数値をAIでまとめて入れる（入力済みの名前・数値は上書きしない） */
+async function startMealTextAnalyses(jobs, { manual = false } = {}) {
+  const todo = jobs.filter(j => !_mealAnalyzing.has(j.id) && findMeal(j.date, j.id));
+  if (!todo.length) return false;
+  todo.forEach(j => _mealAnalyzing.add(j.id));
+  refreshMealViews();
+  let ok = true, filled = 0, unknown = 0;
+  try {
+    for (let i = 0; i < todo.length; i += MEAL_BATCH_MAX) {
+      const chunk = todo.slice(i, i + MEAL_BATCH_MAX);
+      const descs = chunk.map(j => { const m = findMeal(j.date, j.id); return m ? (m.aiText || m.name) : ''; });
+      let res;
+      try {
+        res = await analyzeMealTextBatch(descs);
+      } catch (e) {
+        ok = false;
+        chunk.forEach(j => _mealLastFail.set(j.id, Date.now()));
+        if (!e.network && e.message !== 'NO_KEY') {
+          chunk.forEach(j => { const m = findMeal(j.date, j.id); if (m) m.aiTries = (m.aiTries || 0) + 1; });
+          saveState();
+        }
+        if (manual || chunk.some(j => findMeal(j.date, j.id))) {
+          toast(e.message === 'NO_KEY'
+            ? '設定でAPIキーを登録してください'
+            : `AIで数値を計算できませんでした（${e.message}）。記録は残っています`, 3200);
+        }
+        break;
+      }
+      chunk.forEach((j, k) => {
+        const m = findMeal(j.date, j.id);
+        if (!m || !m.pending) return; // 取り消し・削除・手で入力済み
+        const r = res[k];
+        if (!r) { m.aiTries = (m.aiTries || 0) + 1; unknown++; return; }
+        applyMealAnalysis(m, { name: m.name, kcal: r.kcal, p: r.p, f: r.f, c: r.c, items: m.items || [], note: '' });
+        delete m.aiText;
+        filled++;
+        if (_mealDetailHook && _mealDetailHook.id === m.id) _mealDetailHook.refresh(m);
+      });
+      saveState();
+      // 件数が多いときも、終わった分から画面に出す
+      chunk.forEach(j => _mealAnalyzing.delete(j.id));
+      if (i + MEAL_BATCH_MAX < todo.length) refreshMealViews();
+    }
+  } finally {
+    todo.forEach(j => _mealAnalyzing.delete(j.id));
+    refreshMealViews();
+  }
+  if (filled) toast(`✨ ${filled}件の数値をAIが入れました${unknown ? `（${unknown}件はわからず）` : ''}`, 3200, { soft: !manual });
+  else if (unknown && manual) toast('AIが食べ物として認識できませんでした。名前を具体的にしてみてください', 3200);
+  return ok;
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resumePendingAnalyses(); });
 
@@ -353,6 +435,7 @@ function openMealDetail(index) {
   const itemsHtml = m.items && m.items.length ? `
     <div class="an-items">${m.items.map(i => `<div class="an-item"><span>${esc(i.name)}<small> ${esc(i.amount || '')}</small></span><span>${Math.round(num(i.kcal))}kcal</span></div>`).join('')}</div>` : '';
   const busy = m.pending && isMealAnalyzing(m.id);
+  const known = (k) => !m.pending || !!(m.edited && m.edited[k]); // 解析待ちでも自分で入れた項目は出す
   const body = sheet('食事の詳細', `
     ${m.photo ? `<img class="analyze-preview" data-photo="${m.photo}" alt="">` : ''}
     <div class="an-note" id="md-busy" ${busy ? '' : 'style="display:none"'}><span class="spinner"></span> AIが解析中です。終わると空欄に数値が自動で入ります</div>
@@ -361,12 +444,12 @@ function openMealDetail(index) {
       ${itemsHtml}
     </div>
     <div class="form-grid">
-      <label class="f-label">名前<input type="text" class="input" id="md-name" value="${m.pending ? '' : esc(m.name)}" placeholder="${m.pending ? '未解析（手で入れてもOK）' : ''}"></label>
+      <label class="f-label">名前<input type="text" class="input" id="md-name" value="${known('name') ? esc(m.name) : ''}" placeholder="${known('name') ? '' : '未解析（手で入れてもOK）'}"></label>
       <div class="grid4">
-        <label class="f-label">kcal<input type="number" inputmode="numeric" class="input" id="md-kcal" value="${m.pending ? '' : num(m.kcal)}"></label>
-        <label class="f-label">P(g)<input type="number" inputmode="decimal" class="input" id="md-p" value="${m.pending ? '' : num(m.p)}"></label>
-        <label class="f-label">F(g)<input type="number" inputmode="decimal" class="input" id="md-f" value="${m.pending ? '' : num(m.f)}"></label>
-        <label class="f-label">C(g)<input type="number" inputmode="decimal" class="input" id="md-c" value="${m.pending ? '' : num(m.c)}"></label>
+        <label class="f-label">kcal<input type="number" inputmode="numeric" class="input" id="md-kcal" value="${known('kcal') ? num(m.kcal) : ''}"></label>
+        <label class="f-label">P(g)<input type="number" inputmode="decimal" class="input" id="md-p" value="${known('p') ? num(m.p) : ''}"></label>
+        <label class="f-label">F(g)<input type="number" inputmode="decimal" class="input" id="md-f" value="${known('f') ? num(m.f) : ''}"></label>
+        <label class="f-label">C(g)<input type="number" inputmode="decimal" class="input" id="md-c" value="${known('c') ? num(m.c) : ''}"></label>
       </div>
       <label class="f-label">時刻<input type="time" class="input" id="md-time" value="${esc(m.time || '')}"></label>
       <div class="btn-row">
