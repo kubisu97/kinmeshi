@@ -149,6 +149,7 @@ function renderWorkout(el) {
     <header class="screen-head"><h1 class="screen-title">筋トレ</h1></header>
     ${dateNavHtml(date, 'wd')}
     ${doneSets > 0 ? `<div class="day-summary">${doneSets}セット完了${vol > 0 ? ` ・ 総ボリューム <b>${Math.round(vol).toLocaleString()}</b> kg` : ''}${cMin > 0 ? ` ・ 有酸素 <b>${cMin}</b>分` : ''}</div>` : ''}
+    ${w.entries.length >= 2 ? `<div class="ex-list-head"><span>${w.entries.length}種目</span><button class="ex-reorder" id="reorder-ex" type="button">↕ 順番を変える</button></div>` : ''}
     ${entriesHtml || `<div class="empty-note">「＋ 種目を追加」からトレーニングを記録しましょう</div>`}
     <button class="btn primary big" id="add-ex">＋ 種目を追加</button>
     <button class="btn ghost big" id="ai-menu" style="margin-top:8px">🤖 AIとメニューを作る</button>
@@ -178,6 +179,13 @@ function renderWorkout(el) {
   wireDateNav(el, 'wd', () => App.wDate, v => { App.wDate = v; renderWorkout(el); });
 
   el.querySelector('#add-ex').addEventListener('click', () => openAddExercise(date, el));
+  const ro = el.querySelector('#reorder-ex');
+  if (ro) ro.addEventListener('click', () => openReorderSheet({
+    title: '種目の順番を変える',
+    items: ensureWorkout(date).entries,
+    render: reorderEntryHtml,
+    onDone: () => renderWorkout(el),
+  }));
   el.querySelector('#ai-menu').addEventListener('click', () => openAiMenu(date, el));
   el.querySelectorAll('[data-rt]').forEach(c => c.addEventListener('click', () => openRoutine(c.dataset.rt, date, el)));
   const sr = el.querySelector('#save-routine');
@@ -803,6 +811,53 @@ async function updateWakeLock() {
 }
 document.addEventListener('visibilitychange', () => { updateWakeLock(); });
 
+/* ---------- 種目の並べ替え（今日のメニュー・マイルーチン共通） ----------
+   items（配列）をその場で並べ替えて保存する。≡ をつかんでドラッグ、または ▲▼ で1つずつ */
+function openReorderSheet({ title, items, render, onDone }) {
+  const body = sheet(title, `
+    <div class="hint">右の <b>≡</b> をつかんで上下に動かすか、▲▼で1つずつ動かせます</div>
+    <div class="ro-list" id="ro-list"></div>
+    <button class="btn primary ro-done" id="ro-done" type="button">完了</button>`, { onClose: onDone });
+  const list = body.querySelector('#ro-list');
+  const paint = (moved = -1) => {
+    list.innerHTML = items.map((it, i) => `
+      <div class="ro-row${i === moved ? ' moved' : ''}">
+        <span class="ro-no">${i + 1}</span>
+        <span class="ro-main">${render(it)}</span>
+        <button class="ro-btn" type="button" data-up="${i}" ${i === 0 ? 'disabled' : ''} aria-label="上へ">▲</button>
+        <button class="ro-btn" type="button" data-down="${i}" ${i === items.length - 1 ? 'disabled' : ''} aria-label="下へ">▼</button>
+        <span class="ro-handle" role="button" aria-label="ドラッグで動かす">≡</span>
+      </div>`).join('');
+  };
+  const move = (from, to) => {
+    if (to < 0 || to >= items.length || from === to) return;
+    const [x] = items.splice(from, 1);
+    items.splice(to, 0, x);
+    saveState();
+    paint(to);
+  };
+  paint();
+  list.addEventListener('click', (ev) => {
+    const up = ev.target.closest('[data-up]');
+    if (up) { move(+up.dataset.up, +up.dataset.up - 1); return; }
+    const down = ev.target.closest('[data-down]');
+    if (down) move(+down.dataset.down, +down.dataset.down + 1);
+  });
+  makeSortable(list, move);
+  body.querySelector('#ro-done').addEventListener('click', () => { closeSheet(); if (onDone) onDone(); });
+}
+
+function reorderEntryHtml(e) {
+  const ex = exById(e.exId);
+  const sets = (e.sets || []).length;
+  const done = (e.sets || []).filter(s => s.done).length;
+  return `${ex ? exArt(ex.id) : ''}<span class="ro-t"><b>${esc(ex ? ex.name : '不明な種目')}</b><span>${sets}セット${done ? ` ・ ${done}完了` : ''}</span></span>`;
+}
+function reorderRoutineItemHtml(it) {
+  const ex = exById(it.exId);
+  return `${ex ? exArt(ex.id) : ''}<span class="ro-t"><b>${esc(ex ? ex.name : '不明な種目')}</b><span>${ex ? esc(fmtSets(it.sets || [], ex.unit, ex)) : ''}</span></span>`;
+}
+
 /* ---------- マイルーチン ---------- */
 function todayRoutineItems(w) {
   return w.entries.map(e => ({ exId: e.exId, sets: e.sets.map(s => ({ w: s.w ?? null, r: s.r ?? null })) }));
@@ -857,12 +912,20 @@ function openRoutine(rid, date, screenEl) {
   const today = workoutOf(date);
   const canOverwrite = today && today.entries.length > 0;
   const body = sheet(`⭐ ${rt.name}`, `
+    ${rt.items.length >= 2 ? '<div class="ex-list-head"><span>' + rt.items.length + '種目</span><button class="ex-reorder" id="rt-reorder" type="button">↕ 順番を変える</button></div>' : ''}
     <div class="menu-list">${menuItemsHtml(menu)}</div>
     <div class="btn-row">
       <button class="btn danger ghost" id="rt-del">🗑 削除</button>
       ${canOverwrite ? '<button class="btn ghost" id="rt-update">今日の内容で上書き</button>' : ''}
       <button class="btn primary" id="rt-apply">今日にセット</button>
     </div>`);
+  const roBtn = body.querySelector('#rt-reorder');
+  if (roBtn) roBtn.addEventListener('click', () => openReorderSheet({
+    title: `⭐ ${rt.name} の順番`,
+    items: rt.items,
+    render: reorderRoutineItemHtml,
+    onDone: () => { renderCurrent(); openRoutine(rid, date, screenEl); },
+  }));
   const upBtn = body.querySelector('#rt-update');
   if (upBtn) upBtn.addEventListener('click', async () => {
     if (await confirmDlg(`「${rt.name}」を今日の内容（${today.entries.length}種目）で上書きしますか？`, '上書きする')) {

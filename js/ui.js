@@ -88,6 +88,50 @@ async function saveTextFile(filename, text, mime = 'text/csv') {
   return 'downloaded';
 }
 
+/* ドラッグで並べ替え：.ro-row の .ro-handle をつかんで上下に動かす。離したら onMove(from, to) */
+function makeSortable(list, onMove) {
+  list.addEventListener('pointerdown', (ev) => {
+    const handle = ev.target.closest('.ro-handle');
+    if (!handle || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+    const rows = [...list.querySelectorAll('.ro-row')];
+    const row = handle.closest('.ro-row');
+    const from = rows.indexOf(row);
+    if (from < 0 || rows.length < 2) return;
+    ev.preventDefault();
+    try { handle.setPointerCapture(ev.pointerId); } catch (e) { /* noop */ }
+    const tops = rows.map(r => r.getBoundingClientRect().top);
+    const step = (tops[1] - tops[0]) || row.getBoundingClientRect().height;
+    const startY = ev.clientY;
+    let to = from;
+    row.classList.add('dragging');
+    const onPointerMove = (e) => {
+      if (e.pointerId !== ev.pointerId) return;
+      const dy = e.clientY - startY;
+      const lo = -from * step - step / 2, hi = (rows.length - 1 - from) * step + step / 2;
+      row.style.transform = `translateY(${Math.max(lo, Math.min(hi, dy))}px)`;
+      to = Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / step)));
+      rows.forEach((r, i) => {
+        if (r === row) return;
+        const shift = (from < to && i > from && i <= to) ? -step : (from > to && i >= to && i < from) ? step : 0;
+        r.style.transform = shift ? `translateY(${shift}px)` : '';
+      });
+    };
+    const finish = (commit) => (e) => {
+      if (e.pointerId !== ev.pointerId) return;
+      handle.removeEventListener('pointermove', onPointerMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onCancel);
+      rows.forEach(r => { r.style.transform = ''; });
+      row.classList.remove('dragging');
+      if (commit && to !== from) onMove(from, to);
+    };
+    const onUp = finish(true), onCancel = finish(false);
+    handle.addEventListener('pointermove', onPointerMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onCancel);
+  });
+}
+
 function confirmDlg(msg, okLabel = '削除する') {
   return new Promise(resolve => {
     const body = sheet('確認', `
