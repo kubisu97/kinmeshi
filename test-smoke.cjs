@@ -137,7 +137,7 @@ check(true, '献立の「食べた」で記録できる');
 await page.click('.tabbar button[data-tab="settings"]');
 await page.waitForTimeout(300);
 const st = await page.textContent('#screen');
-check(/v2\.12\.0/.test(st), 'バージョン表示が v2.12.0');
+check(/v2\.13\.0/.test(st), 'バージョン表示が v2.13.0');
 check(/InBody連携/.test(st) && /AI設定/.test(st) && /データ/.test(st), '設定の各セクションが出る');
 
 /* タイマー */

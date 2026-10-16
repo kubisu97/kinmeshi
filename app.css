@@ -278,6 +278,36 @@ body {
 .qf-chip small { display: block; color: var(--muted); font-weight: 500; }
 .qf-chip:active { border-color: var(--accent); }
 
+/* ---------- 種目の並べ替え ---------- */
+.ex-list-head { display: flex; justify-content: space-between; align-items: center; margin: 0 2px 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.ex-reorder { appearance: none; background: none; border: none; color: var(--c-p); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; padding: 6px 0 6px 12px; }
+.ro-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
+.ro-row {
+  position: relative; display: flex; align-items: center; gap: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 6px 4px 6px 8px;
+  transition: transform .15s ease;
+}
+.ro-row.dragging { transition: none; z-index: 2; border-color: var(--accent); box-shadow: 0 10px 26px rgba(0,0,0,.5); }
+.ro-row.moved { animation: roMoved .7s ease; }
+@keyframes roMoved { from { border-color: var(--accent); background: rgba(57,135,229,.16); } to { border-color: var(--border); background: var(--surface-2); } }
+.ro-no { width: 18px; flex: none; text-align: center; font-size: 12px; font-weight: 800; color: var(--muted); }
+.ro-main { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.ro-main .ex-art { width: 36px; height: 36px; flex: none; }
+.ro-t { display: flex; flex-direction: column; min-width: 0; }
+.ro-t b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ro-t span { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ro-btn {
+  appearance: none; flex: none; width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--border); background: var(--bg); color: var(--ink2); font-size: 11px;
+}
+.ro-btn:disabled { opacity: .28; cursor: default; }
+.ro-handle {
+  flex: none; width: 36px; height: 42px; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--muted); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.ro-row.dragging .ro-handle { cursor: grabbing; color: var(--accent); }
+.ro-done { width: 100%; }
+
 /* ---------- まとめて入力（CSV・貼り付け） ---------- */
 .bulk-link {
   display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer; font-family: inherit;

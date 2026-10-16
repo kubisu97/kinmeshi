@@ -312,7 +312,7 @@ open(sys.argv[1], 'wb').write(('日付,時刻,名前,kcal,P,F,C\\r\\n${ymd(3)},�
   const page = await open({ meals: Object.assign({}, HISTORY, { [D(1)]: [photoPending, meal('q1', '12:00', 'カツ丼, 大盛り', 1100, 35)] }) });
   await page.click('.tabbar button[data-tab="settings"]');
   await page.waitForSelector('#st-meal-csv');
-  check(/v2\.12\.0/.test(await page.textContent('#screen')), 'バージョン表示 v2.12.0');
+  check(/v2\.13\.0/.test(await page.textContent('#screen')), 'バージョン表示 v2.13.0');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#st-meal-out')]);
   const out = path.join(SHOTS, 'export.csv');
   await dl.saveAs(out);

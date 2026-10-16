@@ -13,6 +13,7 @@ node test-instant.cjs      # 写真の即記録と裏での解析・チャット
 node test-resilience.cjs   # Gemini通信の粘り強さ（リトライ・モデル切替・thinking非対応の回避）
 node test-meal-history.cjs # いつもの食事（全履歴・よく食べる順・時間帯・検索・取り消し）
 node test-meal-csv.cjs     # まとめて入力（CSV・貼り付け・手打ち・AIまとめ計算・重複・テンプレート）
+node test-reorder.cjs      # 種目の並べ替え（今日のメニュー・マイルーチン、▲▼とドラッグ）
 node test-smoke.cjs        # 主要機能の非退行チェック
 ```
 
@@ -57,4 +58,10 @@ node test-smoke.cjs        # 主要機能の非退行チェック
   - AIに聞く分は `pending` + `aiText` で即記録。名前と書いた数値は `edited` で上書きさせない。閉じても起動時に再開
 - 同じ日・同じ名前・近い時刻（±90分）の記録は確認画面でチェックを外しておく（書き出したCSVを読み直しても二重にならない）
 - テンプレートは、最後に記録した日の翌日から今日までの朝・昼・夜の行入り（BOM付きでExcelでも文字化けしない）
+
+## 種目の並べ替え
+
+- 筋トレ画面で種目が2つ以上あると「↕ 順番を変える」。マイルーチンの画面にも同じボタン
+- 並べ替えシートは `openReorderSheet`（`js/scr-workout.js`）。≡ のドラッグは `makeSortable`（`js/ui.js`、Pointer Events。≡ だけ `touch-action: none` でスクロールと区別）。▲▼でも1つずつ動かせる
+- 動かすたびに保存。ルーチンを並べ替えると「今日にセット」もその順になる
 
